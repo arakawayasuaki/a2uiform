@@ -853,6 +853,9 @@ function setLoading(isLoading) {
   if (formSpinner) {
     formSpinner.classList.toggle("is-active", isLoading);
   }
+  if (formSurface) {
+    formSurface.classList.toggle("is-hidden", isLoading);
+  }
 }
 
 async function handleGenerate() {

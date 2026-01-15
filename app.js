@@ -1,7 +1,6 @@
 const promptInput = document.getElementById("promptInput");
 const generateButton = document.getElementById("generateButton");
 const formSurface = document.getElementById("formSurface");
-const loadingSpinner = document.getElementById("loadingSpinner");
 const formSpinner = document.getElementById("formSpinner");
 const { apiUrl, model } = window.APP_CONFIG || {};
 const apiUrlInput = { value: apiUrl || "http://localhost:8787/api/openai" };
@@ -847,9 +846,6 @@ function setValueByPath(target, path, value) {
 let requestId = 0;
 
 function setLoading(isLoading) {
-  if (loadingSpinner) {
-    loadingSpinner.classList.toggle("is-active", isLoading);
-  }
   if (formSpinner) {
     formSpinner.classList.toggle("is-active", isLoading);
   }

@@ -1,5 +1,4 @@
 const promptInput = document.getElementById("promptInput");
-const generateButton = document.getElementById("generateButton");
 const formSurface = document.getElementById("formSurface");
 const formSpinner = document.getElementById("formSpinner");
 const { apiUrl, model } = window.APP_CONFIG || {};
@@ -873,8 +872,12 @@ async function handleGenerate() {
   }
 }
 
-generateButton.addEventListener("click", handleGenerate);
-generateButton.classList.add("btn", "btn-primary");
+promptInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    handleGenerate();
+  }
+});
 
 promptInput.value = "経費精算システム用のフォームを作って";
 handleGenerate();

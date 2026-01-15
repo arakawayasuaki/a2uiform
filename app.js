@@ -2,6 +2,9 @@ const promptInput = document.getElementById("promptInput");
 const generateButton = document.getElementById("generateButton");
 const formSurface = document.getElementById("formSurface");
 const formSpinner = document.getElementById("formSpinner");
+const searchResults = document.getElementById("searchResults");
+const searchResultCount = document.getElementById("searchResultCount");
+const searchResultList = document.getElementById("searchResultList");
 const { apiUrl, model } = window.APP_CONFIG || {};
 const apiUrlInput = { value: apiUrl || "http://localhost:8787/api/openai" };
 const modelInput = { value: model || "gpt-4o-mini" };
@@ -104,6 +107,184 @@ const allowedFieldTypes = new Set([
 ]);
 
 const optionFieldTypes = new Set(["select", "radio", "multiselect"]);
+const numericFieldTypes = new Set(["number", "currency", "numberRange"]);
+
+let currentFormSpec = null;
+let isSearchMode = false;
+let mockSearchData = [];
+
+function detectSearchMode(promptText, formSpec) {
+  const text = `${promptText} ${formSpec?.title || ""} ${
+    formSpec?.description || ""
+  }`.toLowerCase();
+  if (
+    text.includes("検索") ||
+    text.includes("search") ||
+    text.includes("フィルタ") ||
+    text.includes("絞り込み")
+  ) {
+    return true;
+  }
+  return (formSpec?.fields || []).some((field) =>
+    (field.label || "").includes("検索")
+  );
+}
+
+function buildMockSearchData(formSpec) {
+  const items = [];
+  const count = 8;
+  for (let i = 0; i < count; i += 1) {
+    const item = {};
+    formSpec.fields.forEach((field) => {
+      item[field.id] = buildMockValue(field, i);
+    });
+    items.push(item);
+  }
+  return items;
+}
+
+function buildMockValue(field, index) {
+  const seq = index + 1;
+  switch (field.type) {
+    case "number":
+      return 10 * seq;
+    case "currency":
+      return 1000 * seq;
+    case "numberRange":
+      return 5 * seq;
+    case "date":
+      return `2024-01-${String(seq).padStart(2, "0")}`;
+    case "dateTime":
+      return `2024-01-${String(seq).padStart(2, "0")}T10:00`;
+    case "time":
+      return `${String((seq % 12) + 1).padStart(2, "0")}:00`;
+    case "email":
+      return `user${seq}@example.com`;
+    case "tel":
+      return `090-0000-00${String(seq).padStart(2, "0")}`;
+    case "url":
+      return `https://example.com/item-${seq}`;
+    case "password":
+      return `password${seq}`;
+    case "select":
+    case "radio":
+      return field.options?.[seq % (field.options?.length || 1)] || "選択肢1";
+    case "multiselect": {
+      const options = field.options || ["選択肢1", "選択肢2"];
+      return options.slice(0, Math.min(2, options.length));
+    }
+    case "checkbox":
+    case "switch":
+      return seq % 2 === 0;
+    case "file":
+      return [
+        {
+          name: `sample-${seq}.pdf`,
+          size: 1024 * seq,
+          type: "application/pdf",
+        },
+      ];
+    default:
+      return `${field.label || "項目"} ${seq}`;
+  }
+}
+
+function renderSearchResults(items) {
+  if (!searchResults || !searchResultList || !searchResultCount) {
+    return;
+  }
+
+  if (!isSearchMode) {
+    searchResults.classList.add("d-none");
+    return;
+  }
+
+  searchResults.classList.remove("d-none");
+  searchResultList.innerHTML = "";
+  searchResultCount.textContent = `${items.length}件`;
+
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "list-group-item text-muted";
+    empty.textContent = "該当する結果がありません";
+    searchResultList.appendChild(empty);
+    return;
+  }
+
+  items.forEach((item, index) => {
+    const row = document.createElement("div");
+    row.className = "list-group-item";
+    const heading = document.createElement("div");
+    heading.className = "fw-semibold";
+    heading.textContent = `結果 ${index + 1}`;
+    row.appendChild(heading);
+
+    const list = document.createElement("ul");
+    list.className = "mb-0 ps-3";
+    (currentFormSpec?.fields || []).forEach((field) => {
+      const li = document.createElement("li");
+      li.textContent = `${field.label}: ${formatResultValue(item[field.id])}`;
+      list.appendChild(li);
+    });
+    row.appendChild(list);
+    searchResultList.appendChild(row);
+  });
+}
+
+function formatResultValue(value) {
+  if (Array.isArray(value)) {
+    if (value.length > 0 && typeof value[0] === "object") {
+      return value.map((file) => file.name).join(", ");
+    }
+    return value.join(", ");
+  }
+  if (typeof value === "boolean") {
+    return value ? "はい" : "いいえ";
+  }
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return String(value);
+}
+
+function filterSearchResults(context) {
+  const fields = currentFormSpec?.fields || [];
+  return mockSearchData.filter((item) =>
+    fields.every((field) => {
+      const filterValue = context[field.id];
+      const itemValue = item[field.id];
+      if (field.type === "checkbox" || field.type === "switch") {
+        return filterValue ? itemValue === true : true;
+      }
+      if (field.type === "multiselect") {
+        if (!Array.isArray(filterValue) || filterValue.length === 0) {
+          return true;
+        }
+        return filterValue.some((value) => itemValue?.includes(value));
+      }
+      if (numericFieldTypes.has(field.type)) {
+        if (
+          filterValue === "" ||
+          filterValue === null ||
+          filterValue === undefined ||
+          Number.isNaN(Number(filterValue)) ||
+          Number(filterValue) === 0
+        ) {
+          return true;
+        }
+        const numericFilter = Number(filterValue);
+        return Number(itemValue) >= numericFilter;
+      }
+      if (!filterValue || filterValue === "") {
+        return true;
+      }
+      const filterText = String(filterValue).toLowerCase();
+      return String(itemValue ?? "")
+        .toLowerCase()
+        .includes(filterText);
+    })
+  );
+}
 
 function inferFieldType(label, type) {
   let nextLabel = label;
@@ -349,16 +530,15 @@ function buildA2uiMessages(formSpec) {
     const fieldId = `field_${index}`;
     const fieldPath = `/form/${field.id}`;
     children.push(fieldId);
-    dataModel[field.id] =
-      field.type === "number" ||
-      field.type === "currency" ||
-      field.type === "numberRange"
-        ? 0
-        : field.type === "file" || field.type === "multiselect"
-        ? []
-        : field.type === "checkbox" || field.type === "switch"
-        ? false
-        : "";
+    dataModel[field.id] = numericFieldTypes.has(field.type)
+      ? isSearchMode
+        ? ""
+        : 0
+      : field.type === "file" || field.type === "multiselect"
+      ? []
+      : field.type === "checkbox" || field.type === "switch"
+      ? false
+      : "";
 
     const component = {
       id: fieldId,
@@ -570,6 +750,12 @@ function renderInput(component) {
   } else if (component.component === "Select") {
     input = document.createElement("select");
     input.className = "form-select";
+    if (isSearchMode) {
+      const emptyOption = document.createElement("option");
+      emptyOption.value = "";
+      emptyOption.textContent = "指定なし";
+      input.appendChild(emptyOption);
+    }
     (component.options || []).forEach((option) => {
       const optionNode = document.createElement("option");
       optionNode.value = option.value;
@@ -850,6 +1036,11 @@ function renderButton(component) {
         }
       });
     }
+    if (isSearchMode) {
+      const results = filterSearchResults(context);
+      renderSearchResults(results);
+      return;
+    }
     console.log("submit_form", {
       action: component.action?.name || "submit_form",
       context,
@@ -908,6 +1099,9 @@ function setLoading(isLoading) {
   if (formSurface) {
     formSurface.classList.toggle("is-hidden", isLoading);
   }
+  if (searchResults) {
+    searchResults.classList.toggle("d-none", isLoading || !isSearchMode);
+  }
 }
 
 async function handleGenerate() {
@@ -920,8 +1114,12 @@ async function handleGenerate() {
     if (currentRequest !== requestId) {
       return;
     }
+    currentFormSpec = formSpec;
+    isSearchMode = detectSearchMode(promptText, formSpec);
+    mockSearchData = isSearchMode ? buildMockSearchData(formSpec) : [];
     const messages = buildA2uiMessages(formSpec);
     renderMessages(messages);
+    renderSearchResults([]);
   } finally {
     if (currentRequest === requestId) {
       setLoading(false);

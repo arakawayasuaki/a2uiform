@@ -4,7 +4,8 @@ const formSurface = document.getElementById("formSurface");
 const formSpinner = document.getElementById("formSpinner");
 const searchResults = document.getElementById("searchResults");
 const searchResultCount = document.getElementById("searchResultCount");
-const searchResultList = document.getElementById("searchResultList");
+const searchResultHeader = document.getElementById("searchResultHeader");
+const searchResultBody = document.getElementById("searchResultBody");
 const { apiUrl, model } = window.APP_CONFIG || {};
 const apiUrlInput = { value: apiUrl || "http://localhost:8787/api/openai" };
 const modelInput = { value: model || "gpt-4o-mini" };
@@ -190,7 +191,12 @@ function buildMockValue(field, index) {
 }
 
 function renderSearchResults(items) {
-  if (!searchResults || !searchResultList || !searchResultCount) {
+  if (
+    !searchResults ||
+    !searchResultHeader ||
+    !searchResultBody ||
+    !searchResultCount
+  ) {
     return;
   }
 
@@ -200,34 +206,43 @@ function renderSearchResults(items) {
   }
 
   searchResults.classList.remove("d-none");
-  searchResultList.innerHTML = "";
+  searchResultHeader.innerHTML = "";
+  searchResultBody.innerHTML = "";
   searchResultCount.textContent = `${items.length}件`;
 
-  if (items.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "list-group-item text-muted";
-    empty.textContent = "該当する結果がありません";
-    searchResultList.appendChild(empty);
+  const fields = currentFormSpec?.fields || [];
+  if (fields.length === 0) {
     return;
   }
 
-  items.forEach((item, index) => {
-    const row = document.createElement("div");
-    row.className = "list-group-item";
-    const heading = document.createElement("div");
-    heading.className = "fw-semibold";
-    heading.textContent = `結果 ${index + 1}`;
-    row.appendChild(heading);
+  const headFragment = document.createDocumentFragment();
+  fields.forEach((field) => {
+    const th = document.createElement("th");
+    th.scope = "col";
+    th.textContent = field.label || field.id;
+    headFragment.appendChild(th);
+  });
+  searchResultHeader.appendChild(headFragment);
 
-    const list = document.createElement("ul");
-    list.className = "mb-0 ps-3";
-    (currentFormSpec?.fields || []).forEach((field) => {
-      const li = document.createElement("li");
-      li.textContent = `${field.label}: ${formatResultValue(item[field.id])}`;
-      list.appendChild(li);
+  if (items.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = fields.length;
+    cell.className = "text-muted";
+    cell.textContent = "該当する結果がありません";
+    row.appendChild(cell);
+    searchResultBody.appendChild(row);
+    return;
+  }
+
+  items.forEach((item) => {
+    const row = document.createElement("tr");
+    fields.forEach((field) => {
+      const cell = document.createElement("td");
+      cell.textContent = formatResultValue(item[field.id]);
+      row.appendChild(cell);
     });
-    row.appendChild(list);
-    searchResultList.appendChild(row);
+    searchResultBody.appendChild(row);
   });
 }
 

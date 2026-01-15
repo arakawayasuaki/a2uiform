@@ -552,6 +552,9 @@ function renderInput(component) {
   if (component.component === "RadioGroup") {
     return renderRadioGroup(component);
   }
+  if (component.component === "RangeField") {
+    return renderRangeField(component);
+  }
 
   const wrapper = document.createElement("div");
   wrapper.className = "mb-3";
@@ -608,9 +611,6 @@ function renderInput(component) {
   } else if (component.component === "TimeField") {
     input = document.createElement("input");
     input.type = "time";
-  } else if (component.component === "RangeField") {
-    input = document.createElement("input");
-    input.type = "range";
   } else if (component.component === "CurrencyField") {
     input = document.createElement("input");
     input.type = "number";
@@ -694,8 +694,7 @@ function renderInput(component) {
       }
       const nextValue =
         component.component === "NumberField" ||
-        component.component === "CurrencyField" ||
-        component.component === "RangeField"
+        component.component === "CurrencyField"
           ? Number(event.target.value || 0)
           : event.target.value;
       setValueByPath(surfaceState.dataModel, dataPath, nextValue);
@@ -703,6 +702,63 @@ function renderInput(component) {
   }
 
   wrapper.appendChild(input);
+  return wrapper;
+}
+
+function renderRangeField(component) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "mb-3";
+
+  const label = document.createElement("label");
+  label.className = "form-label";
+  label.textContent = component.label || "未設定";
+  wrapper.appendChild(label);
+
+  const row = document.createElement("div");
+  row.className = "d-flex align-items-center gap-3";
+
+  const rangeInput = document.createElement("input");
+  rangeInput.type = "range";
+  rangeInput.className = "form-range";
+
+  const numberInput = document.createElement("input");
+  numberInput.type = "number";
+  numberInput.className = "form-control";
+  numberInput.style.maxWidth = "120px";
+
+  const valueText = document.createElement("span");
+  valueText.className = "text-muted";
+
+  const dataPath = component.value?.path;
+  const currentValue = dataPath
+    ? getValueByPath(surfaceState.dataModel, dataPath)
+    : 0;
+  const initialValue = Number(currentValue || 0);
+  rangeInput.value = initialValue;
+  numberInput.value = initialValue;
+  valueText.textContent = `${initialValue}`;
+
+  const updateValue = (value) => {
+    const nextValue = Number(value || 0);
+    rangeInput.value = nextValue;
+    numberInput.value = nextValue;
+    valueText.textContent = `${nextValue}`;
+    if (dataPath) {
+      setValueByPath(surfaceState.dataModel, dataPath, nextValue);
+    }
+  };
+
+  rangeInput.addEventListener("input", (event) => {
+    updateValue(event.target.value);
+  });
+  numberInput.addEventListener("input", (event) => {
+    updateValue(event.target.value);
+  });
+
+  row.appendChild(rangeInput);
+  row.appendChild(numberInput);
+  row.appendChild(valueText);
+  wrapper.appendChild(row);
   return wrapper;
 }
 

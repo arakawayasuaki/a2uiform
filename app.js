@@ -872,8 +872,15 @@ async function handleGenerate() {
   }
 }
 
+let isComposing = false;
+promptInput.addEventListener("compositionstart", () => {
+  isComposing = true;
+});
+promptInput.addEventListener("compositionend", () => {
+  isComposing = false;
+});
 promptInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey) {
+  if (event.key === "Enter" && !event.shiftKey && !isComposing) {
     event.preventDefault();
     handleGenerate();
   }

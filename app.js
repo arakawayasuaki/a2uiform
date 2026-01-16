@@ -827,7 +827,18 @@ async function saveSubmission(context) {
       body: JSON.stringify(payload),
     });
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      let detail = "";
+      try {
+        const errorBody = await response.json();
+        detail = errorBody?.message || errorBody?.error || "";
+      } catch (parseError) {
+        try {
+          detail = await response.text();
+        } catch (textError) {
+          detail = "";
+        }
+      }
+      throw new Error(`HTTP ${response.status} ${detail}`.trim());
     }
     const result = await response.json();
     loadSubmissions();

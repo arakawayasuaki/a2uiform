@@ -2,13 +2,17 @@ import { kv } from "@vercel/kv";
 
 const SUBMISSIONS_KEY = "a2uiform:submissions";
 
-function isKvConfigured() {
-  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+function getMissingKvVars() {
+  const required = ["KV_REST_API_URL", "KV_REST_API_TOKEN"];
+  return required.filter((key) => !process.env[key]);
 }
 
 export default async function handler(request, response) {
-  if (!isKvConfigured()) {
-    response.status(500).json({ error: "Vercel KV is not configured" });
+  const missing = getMissingKvVars();
+  if (missing.length > 0) {
+    response
+      .status(500)
+      .json({ error: "Vercel KV is not configured", missing });
     return;
   }
 
@@ -29,7 +33,9 @@ export default async function handler(request, response) {
         .status(200)
         .json({ ok: true, removed: items.length - remaining.length });
     } catch (error) {
-      response.status(500).json({ error: "KV delete failed" });
+      response
+        .status(500)
+        .json({ error: "KV delete failed", message: error.message });
     }
     return;
   }
@@ -61,7 +67,9 @@ export default async function handler(request, response) {
 
       response.status(200).json({ items: flattened });
     } catch (error) {
-      response.status(500).json({ error: "KV read failed" });
+      response
+        .status(500)
+        .json({ error: "KV read failed", message: error.message });
     }
     return;
   }
@@ -95,6 +103,8 @@ export default async function handler(request, response) {
     await kv.lpush(SUBMISSIONS_KEY, ...payloads);
     response.status(200).json({ ok: true, count: entries.length });
   } catch (error) {
-    response.status(500).json({ error: "KV write failed" });
+    response
+      .status(500)
+      .json({ error: "KV write failed", message: error.message });
   }
 }

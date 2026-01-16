@@ -22,6 +22,50 @@ const sidebarLinks = document.querySelectorAll(".app-sidebar .nav-link");
 const { apiUrl, apiBase, model } = window.APP_CONFIG || {};
 const apiUrlInput = { value: apiUrl || "http://localhost:8787/api/openai" };
 const apiBaseUrl = apiBase || "";
+const localSubmissionsKey = "a2ui:submissions";
+
+function readLocalSubmissions() {
+  if (typeof localStorage === "undefined") {
+    return [];
+  }
+  try {
+    const raw = localStorage.getItem(localSubmissionsKey);
+    const parsed = JSON.parse(raw || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function writeLocalSubmissions(items) {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    localStorage.setItem(localSubmissionsKey, JSON.stringify(items));
+  } catch (error) {
+    // ignore storage errors (quota or unavailable)
+  }
+}
+
+function appendLocalSubmissions(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return;
+  }
+  const items = readLocalSubmissions();
+  items.unshift(...entries);
+  writeLocalSubmissions(items);
+}
+
+function removeLocalSubmissionsByFormName(formName) {
+  if (!formName) {
+    return;
+  }
+  const items = readLocalSubmissions().filter(
+    (item) => item.formName !== formName
+  );
+  writeLocalSubmissions(items);
+}
 const modelInput = { value: model || "gpt-4o-mini" };
 
 const surfaceState = {
@@ -431,6 +475,8 @@ async function deleteSubmissionsForForm(formName) {
     loadSubmissions();
   } catch (error) {
     console.error("delete_submissions_failed", error);
+    removeLocalSubmissionsByFormName(formName);
+    loadSubmissions();
   }
 }
 
@@ -762,7 +808,19 @@ async function loadSubmissions() {
     renderSubmissionRows(filtered);
   } catch (error) {
     console.error("load_submissions_failed", error);
-    renderSubmissionRows([]);
+    const items = readLocalSubmissions();
+    const formName = currentFormSpec.title;
+    const scopedItems = items.filter((item) => item.formName === formName);
+    const keyword = submissionSearch?.value?.trim() || "";
+    const filtered = keyword
+      ? scopedItems.filter((item) =>
+          matchesSearch(
+            `${item.formName || ""} ${formatJson(item.data)}`,
+            keyword
+          )
+        )
+      : scopedItems;
+    renderSubmissionRows(filtered);
   }
 }
 
@@ -845,7 +903,16 @@ async function saveSubmission(context) {
     return result;
   } catch (error) {
     console.error("submission_save_failed", error);
-    return null;
+    const payload = {
+      id: `submission_${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      formName: currentFormSpec?.title || "",
+      formSpec: currentFormSpec,
+      data: context,
+    };
+    appendLocalSubmissions([payload]);
+    loadSubmissions();
+    return { ok: true, count: 1, local: true };
   }
 }
 

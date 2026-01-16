@@ -372,6 +372,21 @@
     reportMetricSelect.value = numericFields[0].id;
   }
 
+  const localSubmissionsKey = "a2ui:submissions";
+
+  function readLocalSubmissions() {
+    if (typeof localStorage === "undefined") {
+      return [];
+    }
+    try {
+      const raw = localStorage.getItem(localSubmissionsKey);
+      const parsed = JSON.parse(raw || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
   async function loadSubmissions() {
     try {
       const response = await fetch(`${apiBaseUrl}/api/submissions`);
@@ -398,7 +413,19 @@
       renderReport();
     } catch (error) {
       console.error("report_load_failed", error);
-      allSubmissions = [];
+      const fallback = readLocalSubmissions();
+      const normalized = fallback
+        .map((item) => normalizeSubmission(item))
+        .filter(Boolean);
+      const flattened = [];
+      normalized.forEach((entry) => {
+        if (Array.isArray(entry.items)) {
+          entry.items.forEach((item) => flattened.push(item));
+          return;
+        }
+        flattened.push(entry);
+      });
+      allSubmissions = flattened;
       renderFormOptions();
       renderColumnOptions();
       renderMetricOptions();

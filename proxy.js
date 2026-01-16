@@ -1,4 +1,6 @@
 const http = require("http");
+const fs = require("fs/promises");
+const path = require("path");
 
 const PORT = process.env.PORT || 8787;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -14,7 +16,24 @@ function setCorsHeaders(response) {
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization"
   );
-  response.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+}
+
+const dataDir = path.join(__dirname, ".data");
+const submissionsFile = path.join(dataDir, "submissions.json");
+
+async function readSubmissions() {
+  try {
+    const data = await fs.readFile(submissionsFile, "utf8");
+    return JSON.parse(data);
+  } catch (error) {
+    return [];
+  }
+}
+
+async function writeSubmissions(items) {
+  await fs.mkdir(dataDir, { recursive: true });
+  await fs.writeFile(submissionsFile, JSON.stringify(items, null, 2), "utf8");
 }
 
 const server = http.createServer(async (request, response) => {
@@ -29,8 +48,62 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
-  if (request.method !== "POST" || request.url !== "/api/openai") {
-    console.log(`[${requestId}] ${request.method} ${request.url} -> 404`);
+  const pathname = new URL(request.url, "http://localhost").pathname;
+  if (pathname === "/api/submissions") {
+    if (request.method === "GET") {
+      const items = await readSubmissions();
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ items }));
+      console.log(
+        `[${requestId}] GET /api/submissions -> 200 (${
+          Date.now() - startedAt
+        }ms)`
+      );
+      return;
+    }
+    if (request.method !== "POST") {
+      response.writeHead(405, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ error: "Method Not Allowed" }));
+      console.log(`[${requestId}] ${request.method} /api/submissions -> 405`);
+      return;
+    }
+
+    let body = "";
+    request.on("data", (chunk) => {
+      body += chunk;
+    });
+    request.on("end", async () => {
+      try {
+        const payload = JSON.parse(body || "{}");
+        const items = await readSubmissions();
+        items.unshift({
+          ...payload,
+          createdAt: payload.createdAt || new Date().toISOString(),
+        });
+        await writeSubmissions(items);
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ ok: true }));
+        console.log(
+          `[${requestId}] POST /api/submissions -> 200 (${
+            Date.now() - startedAt
+          }ms)`
+        );
+      } catch (error) {
+        response.writeHead(500, { "Content-Type": "application/json" });
+        response.end(
+          JSON.stringify({
+            error: "Proxy error",
+            message: error.message,
+          })
+        );
+        console.log(`[${requestId}] error ${error.message}`);
+      }
+    });
+    return;
+  }
+
+  if (request.method !== "POST" || pathname !== "/api/openai") {
+    console.log(`[${requestId}] ${request.method} ${pathname} -> 404`);
     response.writeHead(404, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ error: "Not Found" }));
     return;

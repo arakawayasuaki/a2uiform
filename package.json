@@ -1,0 +1,9 @@
+{
+  "name": "a2uiform",
+  "private": true,
+  "version": "1.0.0",
+  "description": "A2UI form generator",
+  "dependencies": {
+    "@vercel/kv": "latest"
+  }
+}

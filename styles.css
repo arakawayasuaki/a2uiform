@@ -84,6 +84,82 @@ body {
   fill: currentColor;
 }
 
+.saved-form-thumb {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  min-width: 220px;
+  width: 100%;
+  cursor: pointer;
+}
+
+.saved-form-thumb:hover {
+  border-color: #c7d2fe;
+  background: #eef2ff;
+}
+
+.saved-form-thumb:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
+.saved-form-thumb__title {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.saved-form-thumb__fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.saved-form-thumb__chip {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.field-draggable {
+  cursor: grab;
+}
+
+.field-draggable.is-dragging {
+  opacity: 0.5;
+}
+
+.field-draggable.is-drop-target {
+  border-radius: 10px;
+  outline: 2px dashed #6366f1;
+  outline-offset: 4px;
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.font-system {
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+.font-sans {
+  font-family: "Helvetica Neue", Arial, "Noto Sans JP", sans-serif;
+}
+
+.font-serif {
+  font-family: "Times New Roman", "Noto Serif JP", serif;
+}
+
+.font-mono {
+  font-family: "SFMono-Regular", Menlo, Consolas, "Noto Sans Mono", monospace;
+}
+
+.font-rounded {
+  font-family: "Arial Rounded MT Bold", "Trebuchet MS", "Noto Sans JP",
+    sans-serif;
+}
+
 .spinner {
   width: 18px;
   height: 18px;

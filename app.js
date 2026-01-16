@@ -6,8 +6,21 @@ const searchResults = document.getElementById("searchResults");
 const searchResultCount = document.getElementById("searchResultCount");
 const searchResultHeader = document.getElementById("searchResultHeader");
 const searchResultBody = document.getElementById("searchResultBody");
-const { apiUrl, model } = window.APP_CONFIG || {};
+const newFormButton = document.getElementById("newFormButton");
+const saveOverwriteButton = document.getElementById("saveOverwriteButton");
+const deleteFormButton = document.getElementById("deleteFormButton");
+const saveAsButton = document.getElementById("saveAsButton");
+const saveNewButton = document.getElementById("saveNewButton");
+const savedFormList = document.getElementById("savedFormList");
+const savedFormCount = document.getElementById("savedFormCount");
+const submissionCount = document.getElementById("submissionCount");
+const submissionSearch = document.getElementById("submissionSearch");
+const submissionBody = document.getElementById("submissionBody");
+const refreshSubmissions = document.getElementById("refreshSubmissions");
+const fontSelect = document.getElementById("fontSelect");
+const { apiUrl, apiBase, model } = window.APP_CONFIG || {};
 const apiUrlInput = { value: apiUrl || "http://localhost:8787/api/openai" };
+const apiBaseUrl = apiBase || "";
 const modelInput = { value: model || "gpt-4o-mini" };
 
 const surfaceState = {
@@ -113,6 +126,13 @@ const numericFieldTypes = new Set(["number", "currency", "numberRange"]);
 let currentFormSpec = null;
 let isSearchMode = false;
 let mockSearchData = [];
+let loadedFormSpec = null;
+let loadedFormName = "";
+let loadedFormId = null;
+let activeFont = "system";
+const savedFormKey = "a2uiform_saved";
+let dndInitialized = false;
+let dragFieldId = null;
 
 function detectSearchMode(promptText, formSpec) {
   const text = `${promptText} ${formSpec?.title || ""} ${
@@ -129,6 +149,303 @@ function detectSearchMode(promptText, formSpec) {
   return (formSpec?.fields || []).some((field) =>
     (field.label || "").includes("検索")
   );
+}
+
+function inferTitleFontSize(promptText) {
+  if (!promptText) {
+    return null;
+  }
+  const match = promptText.match(/(\d{2})\s*px?/i);
+  if (match) {
+    return Number(match[1]);
+  }
+  if (promptText.includes("特大")) {
+    return 28;
+  }
+  if (promptText.includes("大きく") || promptText.includes("大きめ")) {
+    return 24;
+  }
+  if (promptText.includes("小さく") || promptText.includes("小さめ")) {
+    return 16;
+  }
+  return null;
+}
+
+function applyPromptOverrides(formSpec, promptText) {
+  const nextSpec = { ...formSpec };
+  const titleSize = promptText?.includes("タイトル")
+    ? inferTitleFontSize(promptText)
+    : null;
+  if (titleSize) {
+    nextSpec.titleStyle = {
+      ...(formSpec.titleStyle || {}),
+      fontSize: titleSize,
+    };
+  }
+  return nextSpec;
+}
+
+function buildUserPrompt(promptText) {
+  if (!loadedFormSpec) {
+    return promptText;
+  }
+  const nameLine = loadedFormName ? `フォーム名: ${loadedFormName}\n` : "";
+  const instruction = promptText?.trim()
+    ? promptText
+    : "このフォームをベースに更新してください。";
+  return [
+    "以下のフォーム仕様をベースに変更してください。",
+    `${nameLine}フォーム仕様(JSON):`,
+    JSON.stringify(loadedFormSpec),
+    "指示:",
+    instruction,
+  ].join("\n");
+}
+
+function initDragAndDrop() {
+  if (!formSurface || dndInitialized) {
+    return;
+  }
+  dndInitialized = true;
+
+  formSurface.addEventListener("dragstart", (event) => {
+    const target = event.target.closest("[data-field-id]");
+    if (!target) {
+      return;
+    }
+    dragFieldId = target.dataset.fieldId;
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", dragFieldId);
+    target.classList.add("is-dragging");
+  });
+
+  formSurface.addEventListener("dragend", (event) => {
+    const target = event.target.closest("[data-field-id]");
+    if (target) {
+      target.classList.remove("is-dragging");
+    }
+    const highlights = formSurface.querySelectorAll(".is-drop-target");
+    highlights.forEach((element) => element.classList.remove("is-drop-target"));
+    dragFieldId = null;
+  });
+
+  formSurface.addEventListener("dragover", (event) => {
+    const target = event.target.closest("[data-field-id]");
+    if (!target || !dragFieldId) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    const highlights = formSurface.querySelectorAll(".is-drop-target");
+    highlights.forEach((element) => element.classList.remove("is-drop-target"));
+    if (target.dataset.fieldId !== dragFieldId) {
+      target.classList.add("is-drop-target");
+    }
+  });
+
+  formSurface.addEventListener("drop", (event) => {
+    const target = event.target.closest("[data-field-id]");
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    const fromId = dragFieldId || event.dataTransfer.getData("text/plain");
+    const toId = target.dataset.fieldId;
+    if (!fromId || !toId || fromId === toId) {
+      return;
+    }
+    reorderFields(fromId, toId);
+    const highlights = formSurface.querySelectorAll(".is-drop-target");
+    highlights.forEach((element) => element.classList.remove("is-drop-target"));
+  });
+}
+
+function reorderFields(fromId, toId) {
+  if (!currentFormSpec?.fields) {
+    return;
+  }
+  const fields = [...currentFormSpec.fields];
+  const fromIndex = fields.findIndex((field) => field.id === fromId);
+  const toIndex = fields.findIndex((field) => field.id === toId);
+  if (fromIndex === -1 || toIndex === -1) {
+    return;
+  }
+  const [moved] = fields.splice(fromIndex, 1);
+  fields.splice(toIndex, 0, moved);
+  currentFormSpec = { ...currentFormSpec, fields };
+  const messages = buildA2uiMessages(currentFormSpec);
+  renderMessages(messages);
+  renderSearchResults([]);
+}
+
+function loadSavedForms() {
+  try {
+    return JSON.parse(localStorage.getItem(savedFormKey)) || [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function persistSavedForms(items) {
+  localStorage.setItem(savedFormKey, JSON.stringify(items));
+}
+
+function renderSavedForms() {
+  if (!savedFormList || !savedFormCount) {
+    return;
+  }
+  const items = loadSavedForms();
+  savedFormList.innerHTML = "";
+  savedFormCount.textContent = `${items.length}件`;
+
+  if (items.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "list-group-item text-muted";
+    empty.textContent = "保存されたフォームはありません";
+    savedFormList.appendChild(empty);
+    return;
+  }
+
+  items.forEach((item) => {
+    const row = document.createElement("div");
+    row.className =
+      "list-group-item d-flex justify-content-between align-items-center";
+
+    const thumb = document.createElement("button");
+    thumb.type = "button";
+    thumb.className = "saved-form-thumb text-start";
+    thumb.addEventListener("click", () => loadSavedForm(item.id));
+
+    const thumbTitle = document.createElement("div");
+    thumbTitle.className = "saved-form-thumb__title";
+    thumbTitle.textContent = item.formSpec?.title || "フォーム";
+    thumb.appendChild(thumbTitle);
+
+    const fieldWrap = document.createElement("div");
+    fieldWrap.className = "saved-form-thumb__fields";
+    const fields = item.formSpec?.fields || [];
+    const previewFields = fields.slice(0, 6);
+    previewFields.forEach((field) => {
+      const chip = document.createElement("span");
+      chip.className = "saved-form-thumb__chip";
+      chip.textContent = field.label || field.id;
+      fieldWrap.appendChild(chip);
+    });
+    if (fields.length > previewFields.length) {
+      const more = document.createElement("span");
+      more.className = "saved-form-thumb__chip";
+      more.textContent = `+${fields.length - previewFields.length}`;
+      fieldWrap.appendChild(more);
+    }
+    thumb.appendChild(fieldWrap);
+
+    const left = document.createElement("div");
+    left.className = "d-flex flex-column gap-2";
+    left.appendChild(thumb);
+
+    row.appendChild(left);
+    savedFormList.appendChild(row);
+  });
+}
+
+function saveCurrentForm(mode) {
+  if (!currentFormSpec) {
+    alert("保存するフォームがありません。");
+    return;
+  }
+
+  const items = loadSavedForms();
+  const now = new Date();
+  const formTitle = currentFormSpec.title || "無題";
+
+  if (mode === "overwrite" && loadedFormId) {
+    const index = items.findIndex((item) => item.id === loadedFormId);
+    if (index !== -1) {
+      items[index] = {
+        ...items[index],
+        name: formTitle,
+        formSpec: currentFormSpec,
+        prompt: promptInput.value || items[index].prompt || "",
+        updatedAt: now.toLocaleString("ja-JP"),
+      };
+      persistSavedForms(items);
+      renderSavedForms();
+      return;
+    }
+  }
+
+  const entry = {
+    id: `form_${Date.now()}`,
+    name: formTitle,
+    prompt: promptInput.value || "",
+    formSpec: currentFormSpec,
+    createdAt: now.toLocaleString("ja-JP"),
+  };
+  items.unshift(entry);
+  persistSavedForms(items);
+  renderSavedForms();
+}
+
+function loadSavedForm(id) {
+  const items = loadSavedForms();
+  const entry = items.find((item) => item.id === id);
+  if (!entry) {
+    return;
+  }
+  const name = entry.name || "無題";
+  promptInput.value = "";
+  currentFormSpec = entry.formSpec;
+  loadedFormSpec = entry.formSpec;
+  loadedFormName = name;
+  loadedFormId = entry.id;
+  updateSaveButtons();
+  isSearchMode = detectSearchMode(entry.prompt || "", entry.formSpec);
+  mockSearchData = isSearchMode ? buildMockSearchData(entry.formSpec) : [];
+  const messages = buildA2uiMessages(entry.formSpec);
+  renderMessages(messages);
+  renderSearchResults([]);
+  loadSubmissions();
+  initDragAndDrop();
+}
+
+function deleteSavedForm(id) {
+  const items = loadSavedForms().filter((item) => item.id !== id);
+  persistSavedForms(items);
+  renderSavedForms();
+  if (loadedFormId === id) {
+    resetForm();
+  }
+}
+
+function updateSaveButtons() {
+  const hasLoaded = Boolean(loadedFormId);
+  if (saveNewButton) {
+    saveNewButton.classList.toggle("d-none", hasLoaded);
+  }
+  if (saveOverwriteButton) {
+    saveOverwriteButton.classList.toggle("d-none", !hasLoaded);
+  }
+  if (saveAsButton) {
+    saveAsButton.classList.toggle("d-none", !hasLoaded);
+  }
+  if (deleteFormButton) {
+    deleteFormButton.disabled = !hasLoaded;
+    deleteFormButton.classList.toggle("d-none", !hasLoaded);
+  }
+}
+
+function resetForm() {
+  promptInput.value = "";
+  currentFormSpec = null;
+  loadedFormSpec = null;
+  loadedFormName = "";
+  loadedFormId = null;
+  updateSaveButtons();
+  isSearchMode = false;
+  mockSearchData = [];
+  formSurface.innerHTML = "";
+  renderSearchResults([]);
+  renderSubmissionRows([]);
 }
 
 function buildMockSearchData(formSpec) {
@@ -262,6 +579,108 @@ function formatResultValue(value) {
   return String(value);
 }
 
+function formatJson(value) {
+  if (value === null || value === undefined) {
+    return "-";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    return String(value);
+  }
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return "-";
+  }
+  try {
+    return new Date(value).toLocaleString("ja-JP");
+  } catch (error) {
+    return String(value);
+  }
+}
+
+function matchesSearch(text, keyword) {
+  if (!keyword) {
+    return true;
+  }
+  return text.toLowerCase().includes(keyword.toLowerCase());
+}
+
+function renderSubmissionRows(items) {
+  if (!submissionBody || !submissionCount) {
+    return;
+  }
+  submissionBody.innerHTML = "";
+  submissionCount.textContent = `${items.length}件`;
+
+  if (items.length === 0) {
+    const row = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 3;
+    cell.className = "text-muted";
+    cell.textContent = "送信データがありません";
+    row.appendChild(cell);
+    submissionBody.appendChild(row);
+    return;
+  }
+
+  items.forEach((item) => {
+    const row = document.createElement("tr");
+    const dateCell = document.createElement("td");
+    dateCell.textContent = formatDateTime(item.createdAt);
+    const dataCell = document.createElement("td");
+    dataCell.textContent = formatJson(item.data);
+    row.appendChild(dateCell);
+    row.appendChild(dataCell);
+    submissionBody.appendChild(row);
+  });
+}
+
+async function loadSubmissions() {
+  if (!submissionBody) {
+    return;
+  }
+  if (!currentFormSpec?.title) {
+    renderSubmissionRows([]);
+    return;
+  }
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/submissions`);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const items = Array.isArray(data.items) ? data.items : [];
+    const formName = currentFormSpec.title;
+    const scopedItems = items.filter((item) => item.formName === formName);
+    const keyword = submissionSearch?.value?.trim() || "";
+    const filtered = keyword
+      ? scopedItems.filter((item) =>
+          matchesSearch(
+            `${item.formName || ""} ${formatJson(item.data)}`,
+            keyword
+          )
+        )
+      : scopedItems;
+    renderSubmissionRows(filtered);
+  } catch (error) {
+    console.error("load_submissions_failed", error);
+    renderSubmissionRows([]);
+  }
+}
+
+function scheduleSubmissionRefresh() {
+  if (!submissionSearch) {
+    return;
+  }
+  loadSubmissions();
+}
+
 function filterSearchResults(context) {
   const fields = currentFormSpec?.fields || [];
   return mockSearchData.filter((item) =>
@@ -299,6 +718,32 @@ function filterSearchResults(context) {
         .includes(filterText);
     })
   );
+}
+
+async function saveSubmission(context) {
+  try {
+    const payload = {
+      id: `submission_${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      formName: currentFormSpec?.title || "",
+      formSpec: currentFormSpec,
+      data: context,
+    };
+    const response = await fetch(`${apiBaseUrl}/api/submissions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const result = await response.json();
+    loadSubmissions();
+    return result;
+  } catch (error) {
+    console.error("submission_save_failed", error);
+    return null;
+  }
 }
 
 function inferFieldType(label, type) {
@@ -376,6 +821,10 @@ function normalizeFormSpec(rawSpec, fallbackSpec) {
     typeof rawSpec.description === "string"
       ? rawSpec.description.trim()
       : fallbackSpec.description;
+  const titleStyle =
+    rawSpec.titleStyle && typeof rawSpec.titleStyle === "object"
+      ? rawSpec.titleStyle
+      : fallbackSpec.titleStyle;
 
   const rawFields = Array.isArray(rawSpec.fields) ? rawSpec.fields : [];
   const usedIds = new Set();
@@ -430,6 +879,7 @@ function normalizeFormSpec(rawSpec, fallbackSpec) {
     title,
     description,
     fields,
+    titleStyle,
   };
 }
 
@@ -464,7 +914,7 @@ async function resolveFormSpec(promptText, fallbackSpec) {
   const systemPrompt = [
     "あなたは業務フォームの設計者です。",
     "次のJSONスキーマだけを返してください。",
-    '{ "title": string, "description": string, "fields": [',
+    '{ "title": string, "description": string, "titleStyle"?: { "fontSize"?: number }, "fields": [',
     '  { "id": string, "label": string, "type": "text|number|date|dateTime|time|email|tel|url|password|radio|switch|numberRange|currency|multiselect|textarea|select|file|checkbox", "options"?: string[] }',
     "] }",
     "JSON以外の文章は一切出力しないでください。",
@@ -478,7 +928,7 @@ async function resolveFormSpec(promptText, fallbackSpec) {
         model,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: promptText },
+          { role: "user", content: buildUserPrompt(promptText) },
         ],
         temperature: 0.2,
         response_format: { type: "json_object" },
@@ -533,6 +983,7 @@ function buildA2uiMessages(formSpec) {
     id: titleId,
     component: "Text",
     text: formSpec.title,
+    style: formSpec.titleStyle || undefined,
   });
 
   components.push({
@@ -557,6 +1008,7 @@ function buildA2uiMessages(formSpec) {
 
     const component = {
       id: fieldId,
+      fieldId: field.id,
       component:
         field.type === "textarea"
           ? "TextArea"
@@ -678,6 +1130,7 @@ function renderMessages(messages) {
     const rootNode = renderComponent(root);
     formSurface.appendChild(rootNode);
   }
+  applyFontClass();
 }
 
 function applyDataModelUpdate(update) {
@@ -740,6 +1193,9 @@ function renderText(component) {
   const text = document.createElement("div");
   text.className = "fw-semibold";
   text.textContent = component.text || "";
+  if (component.style?.fontSize) {
+    text.style.fontSize = `${component.style.fontSize}px`;
+  }
   return text;
 }
 
@@ -903,6 +1359,7 @@ function renderInput(component) {
   }
 
   wrapper.appendChild(input);
+  applyFieldDragProps(wrapper, component);
   return wrapper;
 }
 
@@ -960,6 +1417,7 @@ function renderRangeField(component) {
   row.appendChild(numberInput);
   row.appendChild(valueText);
   wrapper.appendChild(row);
+  applyFieldDragProps(wrapper, component);
   return wrapper;
 }
 
@@ -1005,6 +1463,7 @@ function renderRadioGroup(component) {
   });
 
   wrapper.appendChild(group);
+  applyFieldDragProps(wrapper, component);
   return wrapper;
 }
 
@@ -1033,6 +1492,7 @@ function renderCheckbox(component, isSwitch) {
 
   wrapper.appendChild(input);
   wrapper.appendChild(label);
+  applyFieldDragProps(wrapper, component);
   return wrapper;
 }
 
@@ -1056,13 +1516,51 @@ function renderButton(component) {
       renderSearchResults(results);
       return;
     }
+    saveSubmission(context);
     console.log("submit_form", {
       action: component.action?.name || "submit_form",
       context,
     });
+    const fields = currentFormSpec?.fields || [];
+    fields.forEach((field) => {
+      const path = `/form/${field.id}`;
+      let value = "";
+      if (numericFieldTypes.has(field.type)) {
+        value = 0;
+      } else if (field.type === "file" || field.type === "multiselect") {
+        value = [];
+      } else if (field.type === "checkbox" || field.type === "switch") {
+        value = false;
+      }
+      setValueByPath(surfaceState.dataModel, path, value);
+    });
+    renderMessages(buildA2uiMessages(currentFormSpec));
   });
 
   return button;
+}
+
+function applyFieldDragProps(wrapper, component) {
+  if (!component?.fieldId) {
+    return;
+  }
+  wrapper.dataset.fieldId = component.fieldId;
+  wrapper.draggable = true;
+  wrapper.classList.add("field-draggable");
+}
+
+function applyFontClass() {
+  if (!formSurface) {
+    return;
+  }
+  formSurface.classList.remove(
+    "font-system",
+    "font-sans",
+    "font-serif",
+    "font-mono",
+    "font-rounded"
+  );
+  formSurface.classList.add(`font-${activeFont}`);
 }
 
 function renderUnsupported(component) {
@@ -1125,21 +1623,27 @@ async function handleGenerate() {
   const fallbackSpec = matchPreset(promptText);
   setLoading(true);
   try {
-    const formSpec = await resolveFormSpec(promptText, fallbackSpec);
+    const resolvedSpec = await resolveFormSpec(promptText, fallbackSpec);
     if (currentRequest !== requestId) {
       return;
     }
+    const formSpec = applyPromptOverrides(resolvedSpec, promptText);
     currentFormSpec = formSpec;
+    if (loadedFormSpec) {
+      loadedFormSpec = formSpec;
+    }
     isSearchMode = detectSearchMode(promptText, formSpec);
     mockSearchData = isSearchMode ? buildMockSearchData(formSpec) : [];
     const messages = buildA2uiMessages(formSpec);
     renderMessages(messages);
     renderSearchResults([]);
+    initDragAndDrop();
   } finally {
     if (currentRequest === requestId) {
       setLoading(false);
     }
   }
+  promptInput.value = "";
 }
 
 let isComposing = false;
@@ -1159,6 +1663,44 @@ promptInput.addEventListener("keydown", (event) => {
 if (generateButton) {
   generateButton.addEventListener("click", handleGenerate);
 }
+if (saveOverwriteButton) {
+  saveOverwriteButton.addEventListener("click", () =>
+    saveCurrentForm("overwrite")
+  );
+}
+if (deleteFormButton) {
+  deleteFormButton.addEventListener("click", () => {
+    if (!loadedFormId) {
+      return;
+    }
+    if (window.confirm("読み込んだフォームを削除しますか？")) {
+      deleteSavedForm(loadedFormId);
+    }
+  });
+}
+if (saveAsButton) {
+  saveAsButton.addEventListener("click", () => saveCurrentForm("saveAs"));
+}
+if (saveNewButton) {
+  saveNewButton.addEventListener("click", () => saveCurrentForm("saveAs"));
+}
+if (newFormButton) {
+  newFormButton.addEventListener("click", resetForm);
+}
+if (submissionSearch) {
+  submissionSearch.addEventListener("input", scheduleSubmissionRefresh);
+}
+if (refreshSubmissions) {
+  refreshSubmissions.addEventListener("click", loadSubmissions);
+}
+if (fontSelect) {
+  fontSelect.addEventListener("change", () => {
+    activeFont = fontSelect.value || "system";
+    applyFontClass();
+  });
+}
 
-promptInput.value = "経費精算システム用のフォームを作って";
-handleGenerate();
+promptInput.value = "";
+renderSavedForms();
+loadSubmissions();
+updateSaveButtons();

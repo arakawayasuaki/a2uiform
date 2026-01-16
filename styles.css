@@ -9,6 +9,63 @@ body {
   background: #eef2f7;
 }
 
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  width: 220px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 24px 16px;
+}
+
+.app-sidebar__title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 12px;
+  color: #94a3b8;
+}
+
+.app-sidebar .nav-link {
+  color: #e2e8f0;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+}
+
+.app-sidebar .nav-link.active,
+.app-sidebar .nav-link:hover {
+  background: #1e293b;
+  color: #ffffff;
+}
+
+.app-content {
+  flex: 1;
+}
+
+.report-chart {
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #ffffff;
+  height: 220px;
+}
+
+.report-chart--compact {
+  padding: 12px;
+}
+
+.report-sheet {
+  min-height: 260px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 8px;
+}
+
 .h3 {
   font-weight: 700;
 }

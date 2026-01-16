@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "description": "A2UI form generator",
   "dependencies": {
-    "@vercel/kv": "latest"
+    "@vercel/kv": "latest",
+    "jspreadsheet-ce": "^5.0.4",
+    "jsuites": "^6.0.3"
   }
 }

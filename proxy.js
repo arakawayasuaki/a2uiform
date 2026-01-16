@@ -52,10 +52,43 @@ const server = http.createServer(async (request, response) => {
   if (pathname === "/api/submissions") {
     if (request.method === "GET") {
       const items = await readSubmissions();
+      const flattened = [];
+      items.forEach((entry) => {
+        if (Array.isArray(entry.items)) {
+          entry.items.forEach((item) => flattened.push(item));
+          return;
+        }
+        flattened.push(entry);
+      });
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ items }));
+      response.end(JSON.stringify({ items: flattened }));
       console.log(
         `[${requestId}] GET /api/submissions -> 200 (${
+          Date.now() - startedAt
+        }ms)`
+      );
+      return;
+    }
+    if (request.method === "DELETE") {
+      const formName = new URL(
+        request.url,
+        "http://localhost"
+      ).searchParams.get("formName");
+      if (!formName) {
+        response.writeHead(400, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ error: "formName is required" }));
+        console.log(`[${requestId}] DELETE /api/submissions -> 400`);
+        return;
+      }
+      const items = await readSubmissions();
+      const remaining = items.filter((item) => item.formName !== formName);
+      await writeSubmissions(remaining);
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(
+        JSON.stringify({ ok: true, removed: items.length - remaining.length })
+      );
+      console.log(
+        `[${requestId}] DELETE /api/submissions -> 200 (${
           Date.now() - startedAt
         }ms)`
       );
@@ -76,13 +109,22 @@ const server = http.createServer(async (request, response) => {
       try {
         const payload = JSON.parse(body || "{}");
         const items = await readSubmissions();
-        items.unshift({
-          ...payload,
-          createdAt: payload.createdAt || new Date().toISOString(),
-        });
+        const now = new Date().toISOString();
+        const entries = Array.isArray(payload.items)
+          ? payload.items.map((item) => ({
+              ...item,
+              createdAt: item.createdAt || now,
+            }))
+          : [
+              {
+                ...payload,
+                createdAt: payload.createdAt || now,
+              },
+            ];
+        items.unshift(...entries);
         await writeSubmissions(items);
         response.writeHead(200, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ ok: true }));
+        response.end(JSON.stringify({ ok: true, count: entries.length }));
         console.log(
           `[${requestId}] POST /api/submissions -> 200 (${
             Date.now() - startedAt

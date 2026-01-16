@@ -18,6 +18,7 @@ const submissionSearch = document.getElementById("submissionSearch");
 const submissionBody = document.getElementById("submissionBody");
 const refreshSubmissions = document.getElementById("refreshSubmissions");
 const fontSelect = document.getElementById("fontSelect");
+const sidebarLinks = document.querySelectorAll(".app-sidebar .nav-link");
 const { apiUrl, apiBase, model } = window.APP_CONFIG || {};
 const apiUrlInput = { value: apiUrl || "http://localhost:8787/api/openai" };
 const apiBaseUrl = apiBase || "";
@@ -417,6 +418,28 @@ function deleteSavedForm(id) {
   }
 }
 
+async function deleteSubmissionsForForm(formName) {
+  try {
+    const response = await fetch(
+      `${apiBaseUrl}/api/submissions?formName=${encodeURIComponent(formName)}`,
+      { method: "DELETE" }
+    );
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    await response.json();
+    loadSubmissions();
+  } catch (error) {
+    console.error("delete_submissions_failed", error);
+  }
+}
+
+function cleanupUnsavedFormData() {
+  if (!loadedFormId && currentFormSpec?.title) {
+    deleteSubmissionsForForm(currentFormSpec.title);
+  }
+}
+
 function updateSaveButtons() {
   const hasLoaded = Boolean(loadedFormId);
   if (saveNewButton) {
@@ -435,6 +458,7 @@ function updateSaveButtons() {
 }
 
 function resetForm() {
+  cleanupUnsavedFormData();
   promptInput.value = "";
   currentFormSpec = null;
   loadedFormSpec = null;
@@ -504,6 +528,74 @@ function buildMockValue(field, index) {
       ];
     default:
       return `${field.label || "項目"} ${seq}`;
+  }
+}
+
+function buildSampleSubmissionData(formSpec, count = 3, startIndex = 0) {
+  const items = [];
+  for (let i = 0; i < count; i += 1) {
+    const item = {};
+    formSpec.fields.forEach((field) => {
+      item[field.id] = buildMockValue(field, i + startIndex);
+    });
+    items.push(item);
+  }
+  return items;
+}
+
+async function ensureSampleSubmissions() {
+  if (!currentFormSpec?.title) {
+    return;
+  }
+  const formName = currentFormSpec.title;
+  try {
+    const targetCount = 10;
+    const fetchItems = async () => {
+      const response = await fetch(`${apiBaseUrl}/api/submissions`);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+      return items.filter((item) => item.formName === formName);
+    };
+
+    const createSamples = async (count, startIndex) => {
+      const samples = buildSampleSubmissionData(
+        currentFormSpec,
+        count,
+        startIndex
+      ).map((sample) => ({
+        id: `sample_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        createdAt: new Date().toISOString(),
+        formName,
+        formSpec: currentFormSpec,
+        data: sample,
+      }));
+      const response = await fetch(`${apiBaseUrl}/api/submissions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: samples }),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+    };
+
+    let existing = await fetchItems();
+    if (existing.length >= targetCount) {
+      return;
+    }
+    await createSamples(targetCount - existing.length, existing.length);
+    loadSubmissions();
+
+    existing = await fetchItems();
+    if (existing.length < targetCount) {
+      await createSamples(targetCount - existing.length, existing.length);
+      loadSubmissions();
+    }
+  } catch (error) {
+    console.error("sample_submission_failed", error);
   }
 }
 
@@ -1638,6 +1730,7 @@ async function handleGenerate() {
     renderMessages(messages);
     renderSearchResults([]);
     initDragAndDrop();
+    ensureSampleSubmissions();
   } finally {
     if (currentRequest === requestId) {
       setLoading(false);
@@ -1674,7 +1767,11 @@ if (deleteFormButton) {
       return;
     }
     if (window.confirm("読み込んだフォームを削除しますか？")) {
+      const name = loadedFormName || currentFormSpec?.title;
       deleteSavedForm(loadedFormId);
+      if (name) {
+        deleteSubmissionsForForm(name);
+      }
     }
   });
 }
@@ -1686,6 +1783,13 @@ if (saveNewButton) {
 }
 if (newFormButton) {
   newFormButton.addEventListener("click", resetForm);
+}
+if (sidebarLinks.length > 0) {
+  sidebarLinks.forEach((link) => {
+    link.addEventListener("click", () => {
+      cleanupUnsavedFormData();
+    });
+  });
 }
 if (submissionSearch) {
   submissionSearch.addEventListener("input", scheduleSubmissionRefresh);

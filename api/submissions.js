@@ -2,10 +2,23 @@ import { kv } from "@vercel/kv";
 
 const SUBMISSIONS_KEY = "a2uiform:submissions";
 
+function isKvConfigured() {
+  return Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
+}
+
 export default async function handler(request, response) {
+  if (!isKvConfigured()) {
+    response.status(500).json({ error: "Vercel KV is not configured" });
+    return;
+  }
+
   if (request.method === "GET") {
-    const items = await kv.lrange(SUBMISSIONS_KEY, 0, 99);
-    response.status(200).json({ items });
+    try {
+      const items = await kv.lrange(SUBMISSIONS_KEY, 0, 99);
+      response.status(200).json({ items });
+    } catch (error) {
+      response.status(500).json({ error: "KV read failed" });
+    }
     return;
   }
 
@@ -25,6 +38,10 @@ export default async function handler(request, response) {
     createdAt: payload.createdAt || new Date().toISOString(),
   };
 
-  await kv.lpush(SUBMISSIONS_KEY, entry);
-  response.status(200).json({ ok: true, entry });
+  try {
+    await kv.lpush(SUBMISSIONS_KEY, entry);
+    response.status(200).json({ ok: true, entry });
+  } catch (error) {
+    response.status(500).json({ error: "KV write failed" });
+  }
 }

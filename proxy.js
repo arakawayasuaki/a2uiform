@@ -2,6 +2,13 @@ const http = require("http");
 const fs = require("fs/promises");
 const path = require("path");
 
+process.on("warning", (warning) => {
+  if (warning?.code === "DEP0169") {
+    return;
+  }
+  console.warn(warning);
+});
+
 const PORT = process.env.PORT || 8787;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";

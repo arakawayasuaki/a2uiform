@@ -23,6 +23,11 @@
   let reportTableList = null;
   let reportDataCard = null;
   let promptApplied = false;
+  let forecastEnabled = false;
+  let forecastSteps = 3;
+  let forecastUnit = "auto";
+  let forecastEndMonth = null;
+  let forecastRequestId = 0;
   let reportChartCard = null;
   let reportChartMaximize = null;
   let reportTableMaximize = null;
@@ -37,7 +42,7 @@
   let sheetInstance = null;
   let delegateBound = false;
 
-  function bindEventOnce(element, event, handler) {
+  function bindEventOnce(element, event, handler, options) {
     if (!element) {
       return;
     }
@@ -52,7 +57,7 @@
     }
     handlers.add(handler);
     eventMap.set(event, handlers);
-    element.addEventListener(event, handler);
+    element.addEventListener(event, handler, options);
   }
 
   function bindElements() {
@@ -105,11 +110,36 @@
     }
   }
 
+  function ensureCardElements() {
+    if (!reportChartCard || !reportChartCard.isConnected) {
+      reportChartCard = document.getElementById("reportChartCard");
+    }
+    if (!reportDataCard || !reportDataCard.isConnected) {
+      reportDataCard = document.getElementById("reportDataCard");
+    }
+    if (!reportChartMaximize || !reportChartMaximize.isConnected) {
+      reportChartMaximize = document.getElementById("reportChartMaximize");
+    }
+    if (!reportTableMaximize || !reportTableMaximize.isConnected) {
+      reportTableMaximize = document.getElementById("reportTableMaximize");
+    }
+    if (!reportChartReset || !reportChartReset.isConnected) {
+      reportChartReset = document.getElementById("reportChartReset");
+    }
+    if (!reportTableReset || !reportTableReset.isConnected) {
+      reportTableReset = document.getElementById("reportTableReset");
+    }
+    if (!refreshReportTable || !refreshReportTable.isConnected) {
+      refreshReportTable = document.getElementById("refreshReportTable");
+    }
+  }
+
   function handleDelegatedClick(event) {
     const target = event.target;
     if (!(target instanceof Element)) {
       return;
     }
+    ensureCardElements();
     if (target.closest("#refreshReport")) {
       loadSubmissions();
       return;
@@ -311,6 +341,84 @@
     return (text || "").toLowerCase().replace(/\s+/g, "");
   }
 
+  function normalizeDateLabelString(label) {
+    if (label === null || label === undefined) {
+      return "";
+    }
+    return String(label)
+      .trim()
+      .replace(/[年月]/g, "-")
+      .replace(/日/g, "")
+      .replace(/[−ー]/g, "-")
+      .replace(/／/g, "/");
+  }
+
+  function resolveForecastUnit(prompt) {
+    const normalized = normalizePromptText(prompt);
+    if (normalized.includes("来月")) {
+      return "month";
+    }
+    if (normalized.match(/(\d+)\s*(ヶ月|か月|月)/)) {
+      return "month";
+    }
+    if (normalized.match(/(\d+)\s*(週|日)/)) {
+      return "day";
+    }
+    if (normalized.includes("月別")) {
+      return "month";
+    }
+    if (normalized.includes("日別")) {
+      return "day";
+    }
+    return "auto";
+  }
+
+  function resolveForecastEndMonth(prompt) {
+    const normalized = normalizePromptText(prompt);
+    const match = normalized.match(/(\d{1,2})月末まで/);
+    if (!match) {
+      return null;
+    }
+    const month = Number(match[1]);
+    if (!Number.isFinite(month) || month < 1 || month > 12) {
+      return null;
+    }
+    return month;
+  }
+
+  function clampForecastSteps(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return 3;
+    }
+    return Math.min(12, Math.max(1, Math.round(numeric)));
+  }
+
+  function resolveForecastStepsFromPrompt(prompt, parsedSteps) {
+    if (parsedSteps !== undefined && parsedSteps !== null) {
+      return clampForecastSteps(parsedSteps);
+    }
+    const normalized = normalizePromptText(prompt);
+    const stepMatch = normalized.match(/(\d+)\s*(期|回|ヶ月|か月|月|週|日)/);
+    if (stepMatch) {
+      return clampForecastSteps(stepMatch[1]);
+    }
+    if (normalized.includes("来月")) {
+      return 1;
+    }
+    return 3;
+  }
+
+  function shouldEnableForecast(prompt) {
+    const normalized = normalizePromptText(prompt);
+    return (
+      normalized.includes("予想") ||
+      normalized.includes("予測") ||
+      normalized.includes("forecast") ||
+      normalized.includes("見通し")
+    );
+  }
+
   function getSelectOptions(select) {
     if (!select) {
       return [];
@@ -468,6 +576,16 @@
       resolveMetricFromPrompt(prompt, getSelectOptions(reportMetricSelect));
     const chartTypeValue =
       parsed?.chartType || resolveChartTypeFromPrompt(prompt);
+    const parsedForecast =
+      typeof parsed?.forecast === "boolean" ? parsed.forecast : null;
+    forecastEnabled =
+      parsedForecast !== null ? parsedForecast : shouldEnableForecast(prompt);
+    forecastSteps = resolveForecastStepsFromPrompt(
+      prompt,
+      parsed?.forecastSteps
+    );
+    forecastUnit = resolveForecastUnit(prompt);
+    forecastEndMonth = resolveForecastEndMonth(prompt);
 
     if (columnValue) {
       setSelectValue(reportColumnSelect, columnValue);
@@ -482,7 +600,12 @@
     promptApplied = true;
     renderReport();
     if (reportPromptResult) {
-      reportPromptResult.textContent = buildPromptResultText();
+      const forecastNote = forecastEnabled
+        ? forecastEndMonth
+          ? ` / 予想: ${forecastEndMonth}月末まで`
+          : ` / 予想: ${forecastSteps}期`
+        : "";
+      reportPromptResult.textContent = `${buildPromptResultText()}${forecastNote}`;
     }
   }
 
@@ -501,6 +624,10 @@
     const columnValue = resolveColumnFromPrompt(prompt, columnOptions);
     const metricValue = resolveMetricFromPrompt(prompt, metricOptions);
     const chartTypeValue = resolveChartTypeFromPrompt(prompt);
+    forecastEnabled = shouldEnableForecast(prompt);
+    forecastSteps = resolveForecastStepsFromPrompt(prompt, null);
+    forecastUnit = resolveForecastUnit(prompt);
+    forecastEndMonth = resolveForecastEndMonth(prompt);
 
     if (columnValue) {
       setSelectValue(reportColumnSelect, columnValue);
@@ -515,7 +642,12 @@
     promptApplied = true;
     renderReport();
     if (reportPromptResult) {
-      reportPromptResult.textContent = buildPromptResultText();
+      const forecastNote = forecastEnabled
+        ? forecastEndMonth
+          ? ` / 予想: ${forecastEndMonth}月末まで`
+          : ` / 予想: ${forecastSteps}期`
+        : "";
+      reportPromptResult.textContent = `${buildPromptResultText()}${forecastNote}`;
     }
   }
 
@@ -537,9 +669,11 @@
     const systemPrompt = [
       "あなたは帳票ダッシュボードのアシスタントです。",
       "次のJSONだけを返してください。",
-      '{ "form": string, "column": string, "metric": string, "chartType": "bar|line|pie" }',
+      '{ "form": string, "column": string, "metric": string, "chartType": "bar|line|pie", "forecast": boolean, "forecastSteps": number }',
       "form/column/metric は候補の value または label から最も近いものを選ぶ。",
       "候補に該当がない場合は空文字にする。",
+      "forecast はユーザーが予想/予測/forecast を求めている場合に true。",
+      "forecastSteps は予測期間(1-12)。ユーザーが指定しない場合は入力欄の値を使う。",
       "出力はJSONのみ。",
     ].join(" ");
     const userPrompt = [
@@ -715,6 +849,24 @@
     if (Array.isArray(rawValue)) {
       rawValue = rawValue.join(", ");
     }
+    if (rawValue instanceof Date) {
+      return rawValue.toISOString().split("T")[0];
+    }
+    if (typeof rawValue === "string") {
+      const trimmed = rawValue.trim();
+      if (trimmed.includes("T")) {
+        return trimmed.split("T")[0] || "未設定";
+      }
+      if (trimmed.includes(" ")) {
+        return trimmed.split(" ")[0] || "未設定";
+      }
+      if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+        return trimmed.slice(0, 10);
+      }
+      if (/^\d{4}\/\d{2}\/\d{2}/.test(trimmed)) {
+        return trimmed.slice(0, 10);
+      }
+    }
     return rawValue === null || rawValue === undefined || rawValue === ""
       ? "未設定"
       : String(rawValue);
@@ -739,6 +891,281 @@
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
   }
 
+  function inferDateFormat(label) {
+    const normalized = normalizeDateLabelString(label);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      return { type: "day", sep: "-", hasYear: true };
+    }
+    if (/^\d{4}\/\d{2}\/\d{2}$/.test(normalized)) {
+      return { type: "day", sep: "/", hasYear: true };
+    }
+    if (/^\d{1,2}\/\d{1,2}$/.test(normalized)) {
+      return { type: "day", sep: "/", hasYear: false };
+    }
+    if (/^\d{4}-\d{2}$/.test(normalized)) {
+      return { type: "month", sep: "-", hasYear: true };
+    }
+    if (/^\d{4}\/\d{2}$/.test(normalized)) {
+      return { type: "month", sep: "/", hasYear: true };
+    }
+    return null;
+  }
+
+  function formatDateLabel(date, format) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    if (format.type === "month") {
+      return `${year}${format.sep}${month}`;
+    }
+    if (format.hasYear) {
+      return `${year}${format.sep}${month}${format.sep}${day}`;
+    }
+    return `${Number(month)}${format.sep}${Number(day)}`;
+  }
+
+  function parseDateFromLabel(label) {
+    const normalized = normalizeDateLabelString(label);
+    const ymd = normalized.match(/(\d{4})([\/-])(\d{1,2})\2(\d{1,2})/);
+    if (ymd) {
+      const year = Number(ymd[1]);
+      const month = Number(ymd[3]) - 1;
+      const day = Number(ymd[4]);
+      return {
+        date: new Date(year, month, day),
+        format: { type: "day", sep: ymd[2], hasYear: true },
+      };
+    }
+    const ym = normalized.match(/(\d{4})([\/-])(\d{1,2})/);
+    if (ym) {
+      const year = Number(ym[1]);
+      const month = Number(ym[3]) - 1;
+      return {
+        date: new Date(year, month, 1),
+        format: { type: "month", sep: ym[2], hasYear: true },
+      };
+    }
+    const md = normalized.match(/(\d{1,2})[\/-](\d{1,2})/);
+    if (md) {
+      const year = new Date().getFullYear();
+      const month = Number(md[1]) - 1;
+      const day = Number(md[2]);
+      return {
+        date: new Date(year, month, day),
+        format: { type: "day", sep: "/", hasYear: false },
+      };
+    }
+    return null;
+  }
+
+  function buildForecastLabels(labels, count, unit = "auto") {
+    if (labels.length === 0) {
+      return Array.from({ length: count }, (_, idx) => `予測${idx + 1}`);
+    }
+    const lastLabel = normalizeDateLabelString(labels[labels.length - 1]);
+    let format = inferDateFormat(lastLabel);
+    let baseInfo = null;
+    if (!format) {
+      baseInfo = parseDateFromLabel(lastLabel);
+      format = baseInfo?.format || null;
+    }
+    if (!format) {
+      return Array.from({ length: count }, (_, idx) => `予測${idx + 1}`);
+    }
+    let base;
+    if (baseInfo?.date) {
+      base = baseInfo.date;
+    } else {
+      const parts = lastLabel.split(format.sep).map((part) => Number(part));
+      const nowYear = new Date().getFullYear();
+      const year = format.hasYear ? parts[0] || nowYear : nowYear;
+      const month = format.hasYear ? (parts[1] || 1) - 1 : (parts[0] || 1) - 1;
+      const day =
+        format.type === "day"
+          ? format.hasYear
+            ? parts[2] || 1
+            : parts[1] || 1
+          : 1;
+      base = new Date(year, month, day);
+    }
+    const nextLabels = [];
+    for (let i = 1; i <= count; i += 1) {
+      const next = new Date(base);
+      const stepUnit = unit === "auto" ? format.type : unit;
+      if (stepUnit === "month") {
+        next.setMonth(base.getMonth() + i);
+      } else {
+        next.setDate(base.getDate() + i);
+      }
+      nextLabels.push(formatDateLabel(next, format));
+    }
+    return nextLabels;
+  }
+
+  function getLastLabelDate(labels) {
+    if (labels.length === 0) {
+      return null;
+    }
+    const lastLabel = labels[labels.length - 1];
+    const parsed = parseDateFromLabel(lastLabel);
+    if (parsed) {
+      return parsed;
+    }
+    const format = inferDateFormat(lastLabel);
+    if (!format) {
+      return null;
+    }
+    const parts = lastLabel.split(format.sep).map((part) => Number(part));
+    const nowYear = new Date().getFullYear();
+    const year = format.hasYear ? parts[0] || nowYear : nowYear;
+    const month = format.hasYear ? (parts[1] || 1) - 1 : (parts[0] || 1) - 1;
+    const day =
+      format.type === "day"
+        ? format.hasYear
+          ? parts[2] || 1
+          : parts[1] || 1
+        : 1;
+    return { date: new Date(year, month, day), format };
+  }
+
+  function buildForecastValues(values, count) {
+    if (values.length === 0) {
+      return Array.from({ length: count }, () => 0);
+    }
+    if (values.length === 1) {
+      return Array.from({ length: count }, () => values[0]);
+    }
+    const n = values.length;
+    let sumX = 0;
+    let sumY = 0;
+    let sumXY = 0;
+    let sumXX = 0;
+    values.forEach((value, index) => {
+      sumX += index;
+      sumY += value;
+      sumXY += index * value;
+      sumXX += index * index;
+    });
+    const denominator = n * sumXX - sumX * sumX;
+    const slope =
+      denominator === 0 ? 0 : (n * sumXY - sumX * sumY) / denominator;
+    const intercept = n === 0 ? 0 : (sumY - slope * sumX) / n;
+    return Array.from({ length: count }, (_, idx) => {
+      const x = n + idx;
+      const forecast = slope * x + intercept;
+      return Math.max(0, Math.round(forecast));
+    });
+  }
+
+  async function fetchForecastValues(
+    values,
+    count,
+    labels,
+    unit,
+    expectedLabels
+  ) {
+    const model = window.APP_CONFIG?.model || "gpt-4o-mini";
+    const systemPrompt = [
+      "あなたは時系列の予測アシスタントです。",
+      "次のJSONだけを返してください。",
+      '{ "forecastLabels": string[], "forecastValues": number[] }',
+      "forecastValues の長さは指定された steps と同じにする。",
+      "forecastLabels は providedForecastLabels と完全一致させる。",
+      "出力はJSONのみ。",
+    ].join(" ");
+    const userPrompt = [
+      "steps:",
+      String(count),
+      "unit:",
+      unit,
+      "lastLabel:",
+      labels[labels.length - 1] || "",
+      "providedForecastLabels:",
+      JSON.stringify(expectedLabels || []),
+      "values:",
+      JSON.stringify(values),
+    ].join("\n");
+    const response = await fetch("/api/openai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const data = await response.json();
+    const content =
+      data?.choices?.[0]?.message?.content ?? data?.output_text ?? "";
+    let parsed = null;
+    if (typeof content === "string") {
+      try {
+        parsed = JSON.parse(content);
+      } catch (error) {
+        parsed = extractJsonFromText(content);
+      }
+    }
+    console.log("forecast_raw_response", parsed);
+    const forecastLabels = Array.isArray(parsed?.forecastLabels)
+      ? parsed.forecastLabels.map((label) => String(label))
+      : [];
+    const forecastValues = Array.isArray(parsed?.forecastValues)
+      ? parsed.forecastValues.map((value) => Number(value))
+      : [];
+    if (forecastValues.length !== count) {
+      throw new Error("forecast length mismatch");
+    }
+    if (
+      expectedLabels?.length === count &&
+      JSON.stringify(forecastLabels) !== JSON.stringify(expectedLabels)
+    ) {
+      throw new Error("forecast labels mismatch");
+    }
+    return {
+      labels: forecastLabels,
+      values: forecastValues.map((value) =>
+        Number.isFinite(value) ? value : 0
+      ),
+    };
+  }
+
+  function applyForecastToChart(
+    labels,
+    values,
+    count,
+    forecastLabels,
+    forecastValues
+  ) {
+    if (!chartInstance) {
+      return;
+    }
+    const baseData = values.concat(Array(count).fill(null));
+    chartInstance.data.labels = labels.concat(forecastLabels);
+    chartInstance.data.datasets[0].data = baseData;
+    chartInstance.data.datasets = [
+      chartInstance.data.datasets[0],
+      {
+        label: "予想",
+        data: Array(values.length).fill(null).concat(forecastValues),
+        borderColor: "rgba(14, 165, 233, 0.9)",
+        backgroundColor: "rgba(14, 165, 233, 0.2)",
+        borderDash: [6, 4],
+        borderWidth: 2,
+        type: "line",
+        tension: 0.35,
+        pointRadius: 3,
+      },
+    ];
+    chartInstance.update();
+  }
+
   function renderChart(items) {
     if (!reportChartCanvas) {
       return;
@@ -746,8 +1173,8 @@
     const xField = reportColumnSelect?.value || "__createdAt";
     const metricField = reportMetricSelect?.value || "__count";
     const grouped = aggregateByField(items, xField, metricField);
-    const labels = grouped.map(([label]) => label);
-    const values = grouped.map(([, count]) => count);
+    let labels = grouped.map(([label]) => label);
+    let values = grouped.map(([, count]) => count);
 
     const metricLabel =
       metricField === "__count"
@@ -780,19 +1207,21 @@
         ? labels.map((_, idx) => palette[idx % palette.length])
         : "rgba(79, 70, 229, 1)";
 
+    const datasets = [
+      {
+        label: metricLabel,
+        data: values,
+        backgroundColor: backgroundColors,
+        borderColor: borderColors,
+        borderWidth: 1,
+      },
+    ];
+
     chartInstance = new Chart(reportChartCanvas, {
       type: chartType,
       data: {
         labels,
-        datasets: [
-          {
-            label: metricLabel,
-            data: values,
-            backgroundColor: backgroundColors,
-            borderColor: borderColors,
-            borderWidth: 1,
-          },
-        ],
+        datasets,
       },
       options: {
         responsive: true,
@@ -812,6 +1241,65 @@
         },
       },
     });
+
+    if (forecastEnabled && chartType !== "pie" && labels.length >= 1) {
+      let forecastCount = Math.max(1, forecastSteps || 3);
+      if (forecastEndMonth) {
+        const lastInfo = getLastLabelDate(labels);
+        if (lastInfo) {
+          const lastMonth = lastInfo.date.getMonth() + 1;
+          const lastYear = lastInfo.date.getFullYear();
+          let targetYear = lastYear;
+          if (forecastEndMonth < lastMonth) {
+            targetYear += 1;
+          }
+          const monthsDiff =
+            (targetYear - lastYear) * 12 + (forecastEndMonth - lastMonth);
+          forecastCount = Math.max(1, monthsDiff);
+          forecastUnit = "month";
+        } else {
+          forecastUnit = "month";
+        }
+      }
+      const requestId = ++forecastRequestId;
+      const fallbackLabels = buildForecastLabels(
+        labels,
+        forecastCount,
+        forecastUnit
+      );
+      fetchForecastValues(
+        values,
+        forecastCount,
+        labels,
+        forecastUnit,
+        fallbackLabels
+      )
+        .then((forecast) => {
+          if (requestId !== forecastRequestId) {
+            return;
+          }
+          applyForecastToChart(
+            labels,
+            values,
+            forecastCount,
+            fallbackLabels,
+            forecast.values
+          );
+        })
+        .catch(() => {
+          if (requestId !== forecastRequestId) {
+            return;
+          }
+          const fallback = buildForecastValues(values, forecastCount);
+          applyForecastToChart(
+            labels,
+            values,
+            forecastCount,
+            fallbackLabels,
+            fallback
+          );
+        });
+    }
   }
 
   function renderSheet(items) {
@@ -1267,6 +1755,7 @@
         handlePromptGenerate();
       }
     });
+    bindEventOnce(document, "click", handleDelegatedClick, { capture: true });
     if (refreshReportTable) {
       bindEventOnce(refreshReportTable, "click", loadSubmissions);
     }

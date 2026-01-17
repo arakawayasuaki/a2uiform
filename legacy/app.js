@@ -29,6 +29,10 @@ function readLocalSubmissions() {
   if (typeof localStorage === "undefined") {
     return [];
   }
+  if (!currentFormSpec?.title) {
+    renderSubmissionRows([]);
+    return;
+  }
   try {
     const raw = localStorage.getItem(localSubmissionsKey);
     const parsed = JSON.parse(raw || "[]");
@@ -835,10 +839,8 @@ async function loadSubmissions() {
     }
     const data = await response.json();
     const items = Array.isArray(data.items) ? data.items : [];
-    const formName = currentFormSpec?.title || "";
-    const scopedItems = formName
-      ? items.filter((item) => item.formName === formName)
-      : items;
+    const formName = currentFormSpec.title;
+    const scopedItems = items.filter((item) => item.formName === formName);
     const keyword = submissionSearch?.value?.trim() || "";
     const filtered = keyword
       ? scopedItems.filter((item) =>
@@ -852,10 +854,8 @@ async function loadSubmissions() {
   } catch (error) {
     console.error("load_submissions_failed", error);
     const items = readLocalSubmissions();
-    const formName = currentFormSpec?.title || "";
-    const scopedItems = formName
-      ? items.filter((item) => item.formName === formName)
-      : items;
+    const formName = currentFormSpec.title;
+    const scopedItems = items.filter((item) => item.formName === formName);
     const keyword = submissionSearch?.value?.trim() || "";
     const filtered = keyword
       ? scopedItems.filter((item) =>

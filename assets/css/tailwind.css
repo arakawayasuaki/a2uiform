@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+@theme {
+  --spacing: 0.25rem;
+}
+
+@import "@nuxt/ui/runtime/index.css";

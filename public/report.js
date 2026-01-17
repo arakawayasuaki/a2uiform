@@ -107,7 +107,7 @@
 
   function handleDelegatedClick(event) {
     const target = event.target;
-    if (!(target instanceof HTMLElement)) {
+    if (!(target instanceof Element)) {
       return;
     }
     if (target.closest("#refreshReport")) {

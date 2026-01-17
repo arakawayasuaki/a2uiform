@@ -352,15 +352,10 @@
     );
     reportMetricSelect.innerHTML = "";
 
-    if (numericFields.length === 0) {
-      const option = document.createElement("option");
-      option.value = "__count";
-      option.textContent = "数値項目なし";
-      reportMetricSelect.appendChild(option);
-      reportMetricSelect.disabled = true;
-      reportMetricSelect.value = "__count";
-      return;
-    }
+    const countOption = document.createElement("option");
+    countOption.value = "__count";
+    countOption.textContent = "指定なし";
+    reportMetricSelect.appendChild(countOption);
 
     numericFields.forEach((field) => {
       const option = document.createElement("option");
@@ -369,7 +364,8 @@
       reportMetricSelect.appendChild(option);
     });
     reportMetricSelect.disabled = false;
-    reportMetricSelect.value = numericFields[0].id;
+    reportMetricSelect.value =
+      numericFields.length > 0 ? numericFields[0].id : "__count";
   }
 
   const localSubmissionsKey = "a2ui:submissions";

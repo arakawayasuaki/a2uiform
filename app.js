@@ -15,7 +15,7 @@ const savedFormList = document.getElementById("savedFormList");
 const savedFormCount = document.getElementById("savedFormCount");
 const submissionCount = document.getElementById("submissionCount");
 const submissionSearch = document.getElementById("submissionSearch");
-const submissionBody = document.getElementById("submissionBody");
+const submissionSheet = document.getElementById("submissionSheet");
 const refreshSubmissions = document.getElementById("refreshSubmissions");
 const fontSelect = document.getElementById("fontSelect");
 const sidebarLinks = document.querySelectorAll(".app-sidebar .nav-link");
@@ -23,6 +23,7 @@ const { apiUrl, apiBase, model } = window.APP_CONFIG || {};
 const apiUrlInput = { value: apiUrl || "http://localhost:8787/api/openai" };
 const apiBaseUrl = apiBase || "";
 const localSubmissionsKey = "a2ui:submissions";
+let submissionSheetInstance = null;
 
 function readLocalSubmissions() {
   if (typeof localStorage === "undefined") {
@@ -749,38 +750,82 @@ function matchesSearch(text, keyword) {
   return text.toLowerCase().includes(keyword.toLowerCase());
 }
 
+function buildSubmissionSheetData(items) {
+  const fieldMap = new Map();
+  const fields = currentFormSpec?.fields || [];
+  if (fields.length > 0) {
+    fields.forEach((field) => fieldMap.set(field.id, field.label || field.id));
+  } else {
+    items.forEach((item) => {
+      Object.keys(item.data || {}).forEach((key) => {
+        if (!fieldMap.has(key)) {
+          fieldMap.set(key, key);
+        }
+      });
+    });
+  }
+  const fieldIds = Array.from(fieldMap.keys());
+  const headers = fieldIds.map((id) => fieldMap.get(id) || id);
+  const rows = items.map((item) =>
+    fieldIds.map((fieldId) => formatJson(item.data?.[fieldId]))
+  );
+  return { headers, rows };
+}
+
 function renderSubmissionRows(items) {
-  if (!submissionBody || !submissionCount) {
+  if (!submissionSheet || !submissionCount) {
     return;
   }
-  submissionBody.innerHTML = "";
   submissionCount.textContent = `${items.length}件`;
 
-  if (items.length === 0) {
-    const row = document.createElement("tr");
-    const cell = document.createElement("td");
-    cell.colSpan = 3;
-    cell.className = "text-muted";
-    cell.textContent = "送信データがありません";
-    row.appendChild(cell);
-    submissionBody.appendChild(row);
+  if (submissionSheetInstance?.destroy) {
+    submissionSheetInstance.destroy();
+    submissionSheetInstance = null;
+  }
+  submissionSheet.textContent = "";
+
+  const spreadsheetFactory =
+    window.jspreadsheet?.default || window.jspreadsheet || null;
+  if (!spreadsheetFactory) {
+    submissionSheet.textContent =
+      "表を表示するライブラリが読み込めませんでした。";
     return;
   }
 
-  items.forEach((item) => {
-    const row = document.createElement("tr");
-    const dateCell = document.createElement("td");
-    dateCell.textContent = formatDateTime(item.createdAt);
-    const dataCell = document.createElement("td");
-    dataCell.textContent = formatJson(item.data);
-    row.appendChild(dateCell);
-    row.appendChild(dataCell);
-    submissionBody.appendChild(row);
-  });
+  const { headers, rows } = buildSubmissionSheetData(items);
+  if (headers.length === 0) {
+    submissionSheet.textContent = "送信データがありません";
+    return;
+  }
+
+  const columns = headers.map((title) => ({ title, type: "text" }));
+  const minDimensions = [headers.length, Math.max(rows.length, 1)];
+  const worksheetConfig = {
+    data: rows,
+    columns,
+    columnSorting: true,
+    minDimensions,
+  };
+
+  try {
+    submissionSheetInstance = spreadsheetFactory(submissionSheet, {
+      worksheets: [worksheetConfig],
+    });
+  } catch (error) {
+    try {
+      submissionSheetInstance = spreadsheetFactory(
+        submissionSheet,
+        worksheetConfig
+      );
+    } catch (innerError) {
+      submissionSheet.textContent = "表の初期化に失敗しました。";
+      console.error(innerError);
+    }
+  }
 }
 
 async function loadSubmissions() {
-  if (!submissionBody) {
+  if (!submissionSheet) {
     return;
   }
   if (!currentFormSpec?.title) {

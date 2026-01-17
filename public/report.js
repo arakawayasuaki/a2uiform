@@ -17,6 +17,18 @@
   let exportExcel = null;
   let reportSheet = null;
   let reportChartCanvas = null;
+  let reportPromptInput = null;
+  let reportPromptButton = null;
+  let reportPromptResult = null;
+  let reportTableList = null;
+  let reportDataCard = null;
+  let promptApplied = false;
+  let reportChartCard = null;
+  let reportChartMaximize = null;
+  let reportTableMaximize = null;
+  let refreshReportTable = null;
+  let reportChartReset = null;
+  let reportTableReset = null;
   const boundHandlers = new WeakMap();
 
   let allSubmissions = [];
@@ -52,6 +64,17 @@
     exportExcel = document.getElementById("exportExcel");
     reportSheet = document.getElementById("reportSheet");
     reportChartCanvas = document.getElementById("reportChart");
+    reportPromptInput = document.getElementById("reportPromptInput");
+    reportPromptButton = document.getElementById("reportPromptButton");
+    reportPromptResult = document.getElementById("reportPromptResult");
+    reportTableList = document.getElementById("reportTableList");
+    reportDataCard = document.getElementById("reportDataCard");
+    reportChartCard = document.getElementById("reportChartCard");
+    reportChartMaximize = document.getElementById("reportChartMaximize");
+    reportTableMaximize = document.getElementById("reportTableMaximize");
+    refreshReportTable = document.getElementById("refreshReportTable");
+    reportChartReset = document.getElementById("reportChartReset");
+    reportTableReset = document.getElementById("reportTableReset");
   }
 
   function handleDelegatedChange(event) {
@@ -91,8 +114,485 @@
       loadSubmissions();
       return;
     }
+    if (target.closest("#refreshReportTable")) {
+      loadSubmissions();
+      return;
+    }
     if (target.closest("#exportExcel")) {
       exportReportToExcel();
+      return;
+    }
+    if (target.closest("#reportChartMaximize")) {
+      toggleCardMaximize(reportChartCard, reportChartMaximize);
+      return;
+    }
+    if (target.closest("#reportTableMaximize")) {
+      toggleCardMaximize(reportDataCard, reportTableMaximize);
+      return;
+    }
+    if (target.closest("#reportChartReset")) {
+      resetCardPosition(reportChartCard, reportChartMaximize);
+      return;
+    }
+    if (target.closest("#reportTableReset")) {
+      resetCardPosition(reportDataCard, reportTableMaximize);
+      return;
+    }
+    if (target.closest("#reportPromptButton")) {
+      handlePromptGenerate();
+    }
+  }
+
+  function setMaximizeButtonState(button, isMaximized) {
+    if (!button) {
+      return;
+    }
+    button.classList.toggle("is-maximized", isMaximized);
+    button.setAttribute("aria-label", isMaximized ? "元に戻す" : "最大化");
+  }
+
+  function toggleCardMaximize(card, button) {
+    if (!card) {
+      return;
+    }
+    const willMaximize = !card.classList.contains("is-maximized");
+    card.classList.toggle("is-maximized", willMaximize);
+    setMaximizeButtonState(button, willMaximize);
+    if (willMaximize) {
+      card.dataset.prevTransform = card.style.transform || "";
+      card.style.transform = "";
+      applyMaximizedBounds(card);
+    } else {
+      if (card.dataset.prevTransform !== undefined) {
+        card.style.transform = card.dataset.prevTransform;
+      }
+      clearMaximizedBounds(card);
+    }
+    updateTableLayout();
+  }
+
+  function applyMaximizedBounds(card) {
+    if (!card) {
+      return;
+    }
+    const sidebar = document.querySelector(".app-sidebar");
+    const hero = document.querySelector(".report-hero");
+    const sidebarRect = sidebar?.getBoundingClientRect();
+    const heroRect = hero?.getBoundingClientRect();
+    const left = (sidebarRect?.right || 0) + 24;
+    const top = (heroRect?.bottom || 0) + 16;
+    card.style.setProperty("--report-max-left", `${left}px`);
+    card.style.setProperty("--report-max-top", `${top}px`);
+    card.style.setProperty("--report-max-right", "24px");
+    card.style.setProperty("--report-max-bottom", "24px");
+    card.style.position = "fixed";
+    card.style.left = `${left}px`;
+    card.style.top = `${top}px`;
+    card.style.right = "24px";
+    card.style.bottom = "24px";
+    card.style.zIndex = "40";
+  }
+
+  function clearMaximizedBounds(card) {
+    if (!card) {
+      return;
+    }
+    card.style.removeProperty("--report-max-left");
+    card.style.removeProperty("--report-max-top");
+    card.style.removeProperty("--report-max-right");
+    card.style.removeProperty("--report-max-bottom");
+    card.style.removeProperty("position");
+    card.style.removeProperty("left");
+    card.style.removeProperty("top");
+    card.style.removeProperty("right");
+    card.style.removeProperty("bottom");
+    card.style.removeProperty("z-index");
+  }
+
+  function refreshMaximizedBounds() {
+    if (reportChartCard?.classList.contains("is-maximized")) {
+      applyMaximizedBounds(reportChartCard);
+    }
+    if (reportDataCard?.classList.contains("is-maximized")) {
+      applyMaximizedBounds(reportDataCard);
+    }
+  }
+
+  function resetCardPosition(card, maximizeButton) {
+    if (!card) {
+      return;
+    }
+    if (card.classList.contains("is-maximized")) {
+      card.classList.remove("is-maximized");
+      clearMaximizedBounds(card);
+      setMaximizeButtonState(maximizeButton, false);
+    }
+    card.style.transform = "";
+    card.dataset.dragX = "0";
+    card.dataset.dragY = "0";
+    updateTableLayout();
+  }
+
+  function updateTableLayout() {
+    if (!reportDataCard || !reportSheet) {
+      return;
+    }
+    const isMaximized = reportDataCard.classList.contains("is-maximized");
+    reportSheet.style.height = isMaximized ? "100%" : "";
+    reportSheet.style.width = isMaximized ? "100%" : "";
+    if (sheetInstance?.refresh) {
+      sheetInstance.refresh();
+      return;
+    }
+    if (promptApplied) {
+      renderSheet(currentReportItems);
+    }
+  }
+
+  function setupDraggableCard(card) {
+    if (!card) {
+      return;
+    }
+    const handle = card.querySelector(".report-card__handle");
+    if (!handle) {
+      return;
+    }
+    let startX = 0;
+    let startY = 0;
+    let originX = 0;
+    let originY = 0;
+    let startRect = null;
+    const onMove = (event) => {
+      const clientX = event.clientX ?? 0;
+      const clientY = event.clientY ?? 0;
+      const dx = clientX - startX;
+      const dy = clientY - startY;
+      if (!startRect) {
+        return;
+      }
+      const maxLeft = Math.max(0, window.innerWidth - startRect.width);
+      const maxTop = Math.max(0, window.innerHeight - startRect.height);
+      const nextLeft = Math.min(maxLeft, Math.max(0, startRect.left + dx));
+      const nextTop = Math.min(maxTop, Math.max(0, startRect.top + dy));
+      const nextX = originX + (nextLeft - startRect.left);
+      const nextY = originY + (nextTop - startRect.top);
+      card.style.transform = `translate(${nextX}px, ${nextY}px)`;
+      card.dataset.dragX = String(nextX);
+      card.dataset.dragY = String(nextY);
+    };
+    const onUp = () => {
+      card.classList.remove("is-dragging");
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    handle.addEventListener(
+      "mousedown",
+      (event) => {
+        if (card.classList.contains("is-maximized")) {
+          return;
+        }
+        if (event.target.closest("button")) {
+          return;
+        }
+        startX = event.clientX;
+        startY = event.clientY;
+        originX = Number(card.dataset.dragX || 0);
+        originY = Number(card.dataset.dragY || 0);
+        startRect = card.getBoundingClientRect();
+        card.classList.add("is-dragging");
+        document.addEventListener("mousemove", onMove, { passive: true });
+        document.addEventListener("mouseup", onUp, { passive: true });
+      },
+      { passive: true }
+    );
+  }
+
+  function normalizePromptText(text) {
+    return (text || "").toLowerCase().replace(/\s+/g, "");
+  }
+
+  function getSelectOptions(select) {
+    if (!select) {
+      return [];
+    }
+    return Array.from(select.options).map((option) => ({
+      value: option.value,
+      label: option.textContent || option.value,
+    }));
+  }
+
+  function findBestOption(prompt, options) {
+    if (!prompt || options.length === 0) {
+      return "";
+    }
+    const normalized = normalizePromptText(prompt);
+    let best = null;
+    options.forEach((option) => {
+      const label = normalizePromptText(option.label);
+      const value = normalizePromptText(option.value);
+      const hit = label && normalized.includes(label);
+      const valueHit = value && normalized.includes(value);
+      if (hit || valueHit) {
+        const score = Math.max(label.length, value.length);
+        if (!best || score > best.score) {
+          best = { value: option.value, score };
+        }
+      }
+    });
+    return best?.value || "";
+  }
+
+  function resolveChartTypeFromPrompt(prompt) {
+    const normalized = normalizePromptText(prompt);
+    if (normalized.includes("折れ線") || normalized.includes("line")) {
+      return "line";
+    }
+    if (normalized.includes("円") || normalized.includes("pie")) {
+      return "pie";
+    }
+    if (normalized.includes("棒") || normalized.includes("bar")) {
+      return "bar";
+    }
+    return "";
+  }
+
+  function resolveColumnFromPrompt(prompt, options) {
+    const normalized = normalizePromptText(prompt);
+    if (
+      normalized.includes("日") ||
+      normalized.includes("日時") ||
+      normalized.includes("日付") ||
+      normalized.includes("日時別") ||
+      normalized.includes("時系列")
+    ) {
+      const dateOption = options.find(
+        (option) => option.value === "__createdAt"
+      );
+      if (dateOption) {
+        return dateOption.value;
+      }
+    }
+    return findBestOption(prompt, options);
+  }
+
+  function resolveMetricFromPrompt(prompt, options) {
+    const normalized = normalizePromptText(prompt);
+    if (
+      normalized.includes("件数") ||
+      normalized.includes("count") ||
+      normalized.includes("人数") ||
+      normalized.includes("数")
+    ) {
+      const countOption = options.find((option) => option.value === "__count");
+      if (countOption) {
+        return countOption.value;
+      }
+    }
+    return findBestOption(prompt, options);
+  }
+
+  function setSelectValue(select, value) {
+    if (!select || !value) {
+      return false;
+    }
+    select.value = value;
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    return true;
+  }
+
+  function extractJsonFromText(text) {
+    if (!text || typeof text !== "string") {
+      return null;
+    }
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      return null;
+    }
+    const slice = text.slice(start, end + 1);
+    try {
+      return JSON.parse(slice);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function resolveOptionValue(value, options) {
+    if (!value) {
+      return "";
+    }
+    const exact = options.find(
+      (option) => option.value === value || option.label === value
+    );
+    if (exact) {
+      return exact.value;
+    }
+    return findBestOption(value, options);
+  }
+
+  function buildPromptResultText() {
+    const selectedForm =
+      formSelect?.options?.[formSelect.selectedIndex]?.textContent || "";
+    const selectedColumn =
+      reportColumnSelect?.options?.[reportColumnSelect.selectedIndex]
+        ?.textContent || "";
+    const selectedMetric =
+      reportMetricSelect?.options?.[reportMetricSelect.selectedIndex]
+        ?.textContent || "";
+    const selectedChart =
+      reportChartType?.options?.[reportChartType.selectedIndex]?.textContent ||
+      "";
+    return `フォーム: ${selectedForm} / 横軸: ${selectedColumn} / 縦軸: ${selectedMetric} / グラフ: ${selectedChart}`;
+  }
+
+  function applyPromptResult(prompt, parsed) {
+    const formOptions = getSelectOptions(formSelect);
+    const columnOptions = getSelectOptions(reportColumnSelect);
+    const metricOptions = getSelectOptions(reportMetricSelect);
+
+    const formValue =
+      resolveOptionValue(parsed?.form, formOptions) ||
+      findBestOption(prompt, formOptions);
+    if (formValue) {
+      setSelectValue(formSelect, formValue);
+    }
+
+    renderColumnOptions();
+    renderMetricOptions();
+
+    const columnValue =
+      resolveOptionValue(parsed?.column, columnOptions) ||
+      resolveColumnFromPrompt(prompt, getSelectOptions(reportColumnSelect));
+    const metricValue =
+      resolveOptionValue(parsed?.metric, metricOptions) ||
+      resolveMetricFromPrompt(prompt, getSelectOptions(reportMetricSelect));
+    const chartTypeValue =
+      parsed?.chartType || resolveChartTypeFromPrompt(prompt);
+
+    if (columnValue) {
+      setSelectValue(reportColumnSelect, columnValue);
+    }
+    if (metricValue) {
+      setSelectValue(reportMetricSelect, metricValue);
+    }
+    if (chartTypeValue) {
+      setSelectValue(reportChartType, chartTypeValue);
+    }
+
+    promptApplied = true;
+    renderReport();
+    if (reportPromptResult) {
+      reportPromptResult.textContent = buildPromptResultText();
+    }
+  }
+
+  function handlePromptGenerateLocal(prompt) {
+    const formOptions = getSelectOptions(formSelect);
+    const formValue = findBestOption(prompt, formOptions);
+    if (formValue) {
+      setSelectValue(formSelect, formValue);
+    }
+
+    renderColumnOptions();
+    renderMetricOptions();
+
+    const columnOptions = getSelectOptions(reportColumnSelect);
+    const metricOptions = getSelectOptions(reportMetricSelect);
+    const columnValue = resolveColumnFromPrompt(prompt, columnOptions);
+    const metricValue = resolveMetricFromPrompt(prompt, metricOptions);
+    const chartTypeValue = resolveChartTypeFromPrompt(prompt);
+
+    if (columnValue) {
+      setSelectValue(reportColumnSelect, columnValue);
+    }
+    if (metricValue) {
+      setSelectValue(reportMetricSelect, metricValue);
+    }
+    if (chartTypeValue) {
+      setSelectValue(reportChartType, chartTypeValue);
+    }
+
+    promptApplied = true;
+    renderReport();
+    if (reportPromptResult) {
+      reportPromptResult.textContent = buildPromptResultText();
+    }
+  }
+
+  async function handlePromptGenerate() {
+    const prompt = reportPromptInput?.value?.trim() || "";
+    if (!prompt) {
+      return;
+    }
+
+    if (reportPromptResult) {
+      reportPromptResult.textContent = "AIが解析中です...";
+    }
+
+    const formOptions = getSelectOptions(formSelect);
+    const columnOptions = getSelectOptions(reportColumnSelect);
+    const metricOptions = getSelectOptions(reportMetricSelect);
+    const chartOptions = getSelectOptions(reportChartType);
+    const model = window.APP_CONFIG?.model || "gpt-4o-mini";
+    const systemPrompt = [
+      "あなたは帳票ダッシュボードのアシスタントです。",
+      "次のJSONだけを返してください。",
+      '{ "form": string, "column": string, "metric": string, "chartType": "bar|line|pie" }',
+      "form/column/metric は候補の value または label から最も近いものを選ぶ。",
+      "候補に該当がない場合は空文字にする。",
+      "出力はJSONのみ。",
+    ].join(" ");
+    const userPrompt = [
+      "ユーザーの指示:",
+      prompt,
+      "",
+      "フォーム候補:",
+      JSON.stringify(formOptions),
+      "横軸候補:",
+      JSON.stringify(columnOptions),
+      "縦軸候補:",
+      JSON.stringify(metricOptions),
+      "グラフ種別候補:",
+      JSON.stringify(chartOptions),
+    ].join("\n");
+
+    try {
+      const response = await fetch("/api/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.2,
+          response_format: { type: "json_object" },
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      const content =
+        data?.choices?.[0]?.message?.content ?? data?.output_text ?? "";
+      let parsed = null;
+      if (typeof content === "string") {
+        try {
+          parsed = JSON.parse(content);
+        } catch (error) {
+          parsed = extractJsonFromText(content);
+        }
+      }
+      if (!parsed) {
+        throw new Error("JSONの解析に失敗しました。");
+      }
+      applyPromptResult(prompt, parsed);
+    } catch (error) {
+      handlePromptGenerateLocal(prompt);
+      if (reportPromptResult) {
+        reportPromptResult.textContent = `${buildPromptResultText()} (AI解析に失敗したため簡易解析で設定しました)`;
+      }
     }
   }
 
@@ -384,7 +884,14 @@
     }
     currentReportItems = filtered;
     renderChart(filtered);
-    renderSheet(filtered);
+    if (promptApplied) {
+      renderSheet(filtered);
+      if (reportDataCard) {
+        reportDataCard.classList.remove("is-hidden");
+      }
+    } else if (reportDataCard) {
+      reportDataCard.classList.add("is-hidden");
+    }
   }
 
   function buildExportRows(items) {
@@ -417,6 +924,9 @@
   }
 
   function exportReportToExcel() {
+    if (!reportSheet) {
+      return;
+    }
     if (typeof XLSX === "undefined") {
       alert("Excel出力ライブラリが読み込まれていません。");
       return;
@@ -451,6 +961,7 @@
       option.value = "";
       option.textContent = "フォームがありません";
       formSelect.appendChild(option);
+      renderTableList([], []);
       return;
     }
     uniqueNames.forEach((name) => {
@@ -461,6 +972,38 @@
     });
     formSelect.value = uniqueNames[0];
     formSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    renderTableList(uniqueNames, submissionNames);
+  }
+
+  function renderTableList(formNames, submissionNames) {
+    if (!reportTableList) {
+      return;
+    }
+    reportTableList.innerHTML = "";
+    if (!Array.isArray(formNames) || formNames.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "text-muted small";
+      empty.textContent = "参照できるテーブルがありません。";
+      reportTableList.appendChild(empty);
+      return;
+    }
+    const countMap = new Map();
+    submissionNames.forEach((name) => {
+      countMap.set(name, (countMap.get(name) || 0) + 1);
+    });
+    formNames.forEach((name) => {
+      const chip = document.createElement("div");
+      chip.className = "report-table-chip";
+      chip.textContent = name;
+      const count = countMap.get(name);
+      if (count) {
+        const countNode = document.createElement("span");
+        countNode.className = "report-table-chip__count";
+        countNode.textContent = `(${count})`;
+        chip.appendChild(countNode);
+      }
+      reportTableList.appendChild(chip);
+    });
   }
 
   function renderColumnOptions() {
@@ -713,13 +1256,45 @@
     bindEventOnce(reportColumnSelect, "change", renderReport);
     bindEventOnce(reportMetricSelect, "change", renderReport);
     bindEventOnce(reportChartType, "change", renderReport);
-    bindEventOnce(exportExcel, "click", exportReportToExcel);
+    if (exportExcel) {
+      bindEventOnce(exportExcel, "click", exportReportToExcel);
+    }
     bindEventOnce(refreshReport, "click", loadSubmissions);
+    bindEventOnce(reportPromptButton, "click", handlePromptGenerate);
+    bindEventOnce(reportPromptInput, "keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        handlePromptGenerate();
+      }
+    });
+    if (refreshReportTable) {
+      bindEventOnce(refreshReportTable, "click", loadSubmissions);
+    }
+    if (reportChartMaximize) {
+      bindEventOnce(reportChartMaximize, "click", () =>
+        toggleCardMaximize(reportChartCard, reportChartMaximize)
+      );
+    }
+    if (reportTableMaximize) {
+      bindEventOnce(reportTableMaximize, "click", () =>
+        toggleCardMaximize(reportDataCard, reportTableMaximize)
+      );
+    }
+    if (reportChartReset) {
+      bindEventOnce(reportChartReset, "click", () =>
+        resetCardPosition(reportChartCard, reportChartMaximize)
+      );
+    }
+    if (reportTableReset) {
+      bindEventOnce(reportTableReset, "click", () =>
+        resetCardPosition(reportDataCard, reportTableMaximize)
+      );
+    }
   }
 
   function initReport() {
     bindElements();
-    if (!reportSheet) {
+    if (!reportChartCanvas) {
       return;
     }
     bindEvents();
@@ -729,6 +1304,16 @@
       delegateBound = true;
     }
     loadSubmissions();
+    if (reportDataCard) {
+      reportDataCard.classList.add("is-hidden");
+    }
+    setupDraggableCard(reportChartCard);
+    setupDraggableCard(reportDataCard);
+    setMaximizeButtonState(reportChartMaximize, false);
+    setMaximizeButtonState(reportTableMaximize, false);
+    resetCardPosition(reportChartCard);
+    resetCardPosition(reportDataCard);
+    window.addEventListener("resize", refreshMaximizedBounds);
   }
 
   window.A2UI_REPORT = window.A2UI_REPORT || {};

@@ -23,6 +23,7 @@ if (window.__A2UI_APP_INITIALIZED__) {
   let submissionSheet = null;
   let refreshSubmissions = null;
   let fontSelect = null;
+  let propertyPanel = null;
   let sidebarLinks = [];
   const boundHandlers = new WeakMap();
   const { apiUrl, apiBase, model } = window.APP_CONFIG || {};
@@ -31,6 +32,9 @@ if (window.__A2UI_APP_INITIALIZED__) {
   const localSubmissionsKey = "a2ui:submissions";
   let submissionSheetInstance = null;
   let searchSheetInstance = null;
+  const componentNodes = new Map();
+  let selectedComponentId = null;
+  let suppressButtonSubmit = false;
 
   function bindEventOnce(element, event, handler) {
     if (!element) {
@@ -70,6 +74,7 @@ if (window.__A2UI_APP_INITIALIZED__) {
     submissionSheet = document.getElementById("submissionSheet");
     refreshSubmissions = document.getElementById("refreshSubmissions");
     fontSelect = document.getElementById("fontSelect");
+    propertyPanel = document.getElementById("propertyPanel");
     sidebarLinks = document.querySelectorAll(".app-sidebar .nav-link");
   }
 
@@ -1205,7 +1210,31 @@ if (window.__A2UI_APP_INITIALIZED__) {
         }
         usedIds.add(id);
 
+        const placeholder =
+          typeof field.placeholder === "string" ? field.placeholder : undefined;
+        const defaultValue =
+          field.defaultValue !== undefined ? field.defaultValue : undefined;
+        const style =
+          field.style && typeof field.style === "object"
+            ? field.style
+            : undefined;
+        const labelStyle =
+          field.labelStyle && typeof field.labelStyle === "object"
+            ? field.labelStyle
+            : undefined;
         const normalizedField = { id, label, type };
+        if (placeholder) {
+          normalizedField.placeholder = placeholder;
+        }
+        if (defaultValue !== undefined) {
+          normalizedField.defaultValue = defaultValue;
+        }
+        if (style) {
+          normalizedField.style = style;
+        }
+        if (labelStyle) {
+          normalizedField.labelStyle = labelStyle;
+        }
         if (optionFieldTypes.has(type)) {
           const options = Array.isArray(field.options)
             ? field.options.filter((option) => typeof option === "string")
@@ -1336,21 +1365,32 @@ if (window.__A2UI_APP_INITIALIZED__) {
       id: descId,
       component: "Text",
       text: formSpec.description,
+      style: formSpec.descriptionStyle || undefined,
     });
 
     formSpec.fields.forEach((field, index) => {
       const fieldId = `field_${index}`;
       const fieldPath = `/form/${field.id}`;
       children.push(fieldId);
-      dataModel[field.id] = numericFieldTypes.has(field.type)
-        ? isSearchMode
-          ? ""
-          : 0
-        : field.type === "file" || field.type === "multiselect"
-        ? []
-        : field.type === "checkbox" || field.type === "switch"
-        ? false
-        : "";
+      let initialValue = field.defaultValue;
+      if (initialValue === undefined) {
+        initialValue = numericFieldTypes.has(field.type)
+          ? isSearchMode
+            ? ""
+            : 0
+          : field.type === "file" || field.type === "multiselect"
+          ? []
+          : field.type === "checkbox" || field.type === "switch"
+          ? false
+          : "";
+      } else if (numericFieldTypes.has(field.type)) {
+        initialValue = Number(initialValue || 0);
+      } else if (field.type === "checkbox" || field.type === "switch") {
+        initialValue = Boolean(initialValue);
+      } else if (field.type === "multiselect") {
+        initialValue = Array.isArray(initialValue) ? initialValue : [];
+      }
+      dataModel[field.id] = initialValue;
 
       const component = {
         id: fieldId,
@@ -1393,6 +1433,9 @@ if (window.__A2UI_APP_INITIALIZED__) {
             : "TextField",
         label: field.label,
         value: { path: fieldPath },
+        placeholder: field.placeholder,
+        style: field.style,
+        labelStyle: field.labelStyle,
       };
 
       if (optionFieldTypes.has(field.type)) {
@@ -1456,6 +1499,9 @@ if (window.__A2UI_APP_INITIALIZED__) {
     formSurface.innerHTML = "";
     surfaceState.components.clear();
     surfaceState.dataModel = {};
+    componentNodes.clear();
+    selectedComponentId = null;
+    renderPropertyPanel(null);
 
     messages.forEach((message) => {
       if (message.createSurface) {
@@ -1477,6 +1523,967 @@ if (window.__A2UI_APP_INITIALIZED__) {
       formSurface.appendChild(rootNode);
     }
     applyFontClass();
+  }
+
+  function attachComponentNode(component, node) {
+    if (!component?.id || !node) {
+      return;
+    }
+    componentNodes.set(component.id, node);
+    node.dataset.componentId = component.id;
+    node.classList.add("component-selectable");
+    if (selectedComponentId === component.id) {
+      node.classList.add("component-selected");
+    }
+    node.addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectComponent(component.id);
+    });
+  }
+
+  function clearSelectedComponent() {
+    if (selectedComponentId) {
+      const prevNode = componentNodes.get(selectedComponentId);
+      prevNode?.classList.remove("component-selected");
+    }
+    selectedComponentId = null;
+    renderPropertyPanel(null);
+  }
+
+  function selectComponent(componentId) {
+    if (!componentId || selectedComponentId === componentId) {
+      return;
+    }
+    if (selectedComponentId) {
+      const prevNode = componentNodes.get(selectedComponentId);
+      prevNode?.classList.remove("component-selected");
+    }
+    selectedComponentId = componentId;
+    const nextNode = componentNodes.get(componentId);
+    nextNode?.classList.add("component-selected");
+    renderPropertyPanel(surfaceState.components.get(componentId));
+  }
+
+  function updateFormSpecTitle(text, fontSize) {
+    if (!currentFormSpec) {
+      return;
+    }
+    currentFormSpec.title = text;
+    if (fontSize === undefined) {
+      return;
+    }
+    if (fontSize === null) {
+      if (currentFormSpec.titleStyle) {
+        delete currentFormSpec.titleStyle.fontSize;
+        if (!Object.keys(currentFormSpec.titleStyle).length) {
+          delete currentFormSpec.titleStyle;
+        }
+      }
+      return;
+    }
+    currentFormSpec.titleStyle = currentFormSpec.titleStyle || {};
+    currentFormSpec.titleStyle.fontSize = fontSize;
+  }
+
+  function updateFormSpecTitleColor(color) {
+    if (!currentFormSpec) {
+      return;
+    }
+    currentFormSpec.titleStyle = currentFormSpec.titleStyle || {};
+    if (!color) {
+      delete currentFormSpec.titleStyle.color;
+    } else {
+      currentFormSpec.titleStyle.color = color;
+    }
+  }
+
+  function updateFormSpecDescription(text) {
+    if (!currentFormSpec) {
+      return;
+    }
+    currentFormSpec.description = text;
+  }
+
+  function updateFormSpecDescriptionColor(color) {
+    if (!currentFormSpec) {
+      return;
+    }
+    currentFormSpec.descriptionStyle = currentFormSpec.descriptionStyle || {};
+    if (!color) {
+      delete currentFormSpec.descriptionStyle.color;
+    } else {
+      currentFormSpec.descriptionStyle.color = color;
+    }
+  }
+
+  function updateFieldSpecLabel(fieldId, label) {
+    if (!currentFormSpec?.fields || !fieldId) {
+      return;
+    }
+    const field = currentFormSpec.fields.find((item) => item.id === fieldId);
+    if (field) {
+      field.label = label;
+    }
+  }
+
+  function updateFieldSpecPlaceholder(fieldId, placeholder) {
+    if (!currentFormSpec?.fields || !fieldId) {
+      return;
+    }
+    const field = currentFormSpec.fields.find((item) => item.id === fieldId);
+    if (field) {
+      if (!placeholder) {
+        delete field.placeholder;
+      } else {
+        field.placeholder = placeholder;
+      }
+    }
+  }
+
+  function updateFieldSpecDefaultValue(fieldId, value) {
+    if (!currentFormSpec?.fields || !fieldId) {
+      return;
+    }
+    const field = currentFormSpec.fields.find((item) => item.id === fieldId);
+    if (field) {
+      field.defaultValue = value;
+    }
+  }
+
+  function updateFieldSpecOptions(fieldId, options) {
+    if (!currentFormSpec?.fields || !fieldId) {
+      return;
+    }
+    const field = currentFormSpec.fields.find((item) => item.id === fieldId);
+    if (field) {
+      field.options = options;
+    }
+  }
+
+  function updateFieldSpecStyle(fieldId, style) {
+    if (!currentFormSpec?.fields || !fieldId) {
+      return;
+    }
+    const field = currentFormSpec.fields.find((item) => item.id === fieldId);
+    if (field) {
+      if (!style || !Object.keys(style).length) {
+        delete field.style;
+      } else {
+        field.style = style;
+      }
+    }
+  }
+
+  function updateFieldSpecLabelStyle(fieldId, style) {
+    if (!currentFormSpec?.fields || !fieldId) {
+      return;
+    }
+    const field = currentFormSpec.fields.find((item) => item.id === fieldId);
+    if (field) {
+      if (!style || !Object.keys(style).length) {
+        delete field.labelStyle;
+      } else {
+        field.labelStyle = style;
+      }
+    }
+  }
+
+  function updateTextNode(component) {
+    const node = componentNodes.get(component.id);
+    if (!node) {
+      return;
+    }
+    node.textContent = component.text || "";
+    if (component.style?.fontSize) {
+      node.style.fontSize = `${component.style.fontSize}px`;
+    } else {
+      node.style.removeProperty("font-size");
+    }
+    if (component.style?.color) {
+      node.style.color = component.style.color;
+    } else {
+      node.style.removeProperty("color");
+    }
+  }
+
+  function updateLabelNode(component) {
+    const node = componentNodes.get(component.id);
+    if (!node) {
+      return;
+    }
+    const label =
+      node.querySelector("label.form-label") ||
+      node.querySelector("label.form-check-label");
+    if (label) {
+      label.textContent = component.label || "未設定";
+      if (component.labelStyle?.fontSize) {
+        label.style.fontSize = `${component.labelStyle.fontSize}px`;
+      } else {
+        label.style.removeProperty("font-size");
+      }
+      if (component.labelStyle?.fontWeight) {
+        label.style.fontWeight = String(component.labelStyle.fontWeight);
+      } else {
+        label.style.removeProperty("font-weight");
+      }
+      if (component.labelStyle?.color) {
+        label.style.color = component.labelStyle.color;
+      } else {
+        label.style.removeProperty("color");
+      }
+    }
+  }
+
+  function updateInputNodeStyle(component) {
+    const node = componentNodes.get(component.id);
+    if (!node) {
+      return;
+    }
+    const input =
+      node.querySelector("input") ||
+      node.querySelector("textarea") ||
+      node.querySelector("select");
+    if (!input) {
+      return;
+    }
+    if (component.style?.fontSize) {
+      input.style.fontSize = `${component.style.fontSize}px`;
+    } else {
+      input.style.removeProperty("font-size");
+    }
+    if (component.style?.color) {
+      input.style.color = component.style.color;
+    } else {
+      input.style.removeProperty("color");
+    }
+    if (component.style?.backgroundColor) {
+      input.style.backgroundColor = component.style.backgroundColor;
+    } else {
+      input.style.removeProperty("background-color");
+    }
+    if (component.style?.width) {
+      input.style.width = normalizeSizeValue(component.style.width);
+    } else {
+      input.style.removeProperty("width");
+    }
+    if (component.style?.height) {
+      input.style.height = normalizeSizeValue(component.style.height);
+    } else {
+      input.style.removeProperty("height");
+    }
+  }
+
+  function normalizeSizeValue(value) {
+    if (value === undefined || value === null) {
+      return "";
+    }
+    const raw = String(value).trim();
+    if (!raw) {
+      return "";
+    }
+    if (/^\d+(\.\d+)?$/.test(raw)) {
+      return `${raw}px`;
+    }
+    return raw;
+  }
+
+  function updateButtonNode(component) {
+    const node = componentNodes.get(component.id);
+    if (!node) {
+      return;
+    }
+    const button =
+      node.tagName === "BUTTON" ? node : node.querySelector("button");
+    if (!button) {
+      return;
+    }
+    if (component.style?.fontSize) {
+      button.style.fontSize = `${component.style.fontSize}px`;
+    } else {
+      button.style.removeProperty("font-size");
+    }
+    if (component.style?.color) {
+      button.style.color = component.style.color;
+    } else {
+      button.style.removeProperty("color");
+    }
+    if (component.style?.backgroundColor) {
+      button.style.backgroundColor = component.style.backgroundColor;
+      button.style.borderColor = component.style.backgroundColor;
+    } else {
+      button.style.removeProperty("background-color");
+      button.style.removeProperty("border-color");
+    }
+    if (component.style?.width) {
+      button.style.width = normalizeSizeValue(component.style.width);
+    } else {
+      button.style.removeProperty("width");
+    }
+    if (component.style?.height) {
+      button.style.height = normalizeSizeValue(component.style.height);
+    } else {
+      button.style.removeProperty("height");
+    }
+  }
+
+  function setComponentValue(component, value) {
+    const dataPath = component.value?.path;
+    if (dataPath) {
+      setValueByPath(surfaceState.dataModel, dataPath, value);
+    }
+    const node = componentNodes.get(component.id);
+    if (!node) {
+      return;
+    }
+    if (
+      component.component === "CheckboxField" ||
+      component.component === "SwitchField"
+    ) {
+      const checkbox = node.querySelector('input[type="checkbox"]');
+      if (checkbox) {
+        checkbox.checked = Boolean(value);
+      }
+      return;
+    }
+    if (component.component === "RadioGroup") {
+      const radios = node.querySelectorAll('input[type="radio"]');
+      radios.forEach((radio) => {
+        radio.checked = radio.value === value;
+      });
+      return;
+    }
+    if (component.component === "MultiSelect") {
+      const select = node.querySelector("select");
+      if (select) {
+        const values = Array.isArray(value) ? value : [];
+        Array.from(select.options).forEach((option) => {
+          option.selected = values.includes(option.value);
+        });
+      }
+      return;
+    }
+    if (component.component === "Select") {
+      const select = node.querySelector("select");
+      if (select) {
+        select.value = value ?? "";
+      }
+      return;
+    }
+    if (component.component === "RangeField") {
+      const range = node.querySelector('input[type="range"]');
+      const number = node.querySelector('input[type="number"]');
+      if (range) {
+        range.value = value ?? "";
+      }
+      if (number) {
+        number.value = value ?? "";
+      }
+      return;
+    }
+    if (component.component === "FileField") {
+      return;
+    }
+    const input = node.querySelector("input") || node.querySelector("textarea");
+    if (input) {
+      input.value = value ?? "";
+    }
+  }
+
+  function syncButtonLabel(labelComponent) {
+    if (!labelComponent?.id) {
+      return;
+    }
+    surfaceState.components.forEach((component) => {
+      if (component.component !== "Button") {
+        return;
+      }
+      if (component.child !== labelComponent.id) {
+        return;
+      }
+      const node = componentNodes.get(component.id);
+      const button =
+        node?.tagName === "BUTTON" ? node : node?.querySelector("button");
+      if (button) {
+        button.textContent = labelComponent.text || "送信";
+      }
+    });
+  }
+
+  function replaceComponentNode(component) {
+    const currentNode = componentNodes.get(component.id);
+    if (!currentNode) {
+      return;
+    }
+    componentNodes.delete(component.id);
+    const nextNode = renderComponent(component);
+    currentNode.replaceWith(nextNode);
+    if (selectedComponentId === component.id) {
+      nextNode.classList.add("component-selected");
+    }
+  }
+
+  function renderPropertyPanel(component) {
+    if (!propertyPanel) {
+      return;
+    }
+    propertyPanel.innerHTML = "";
+    if (!component) {
+      const empty = document.createElement("p");
+      empty.className = "text-muted small mb-0";
+      empty.textContent =
+        "コンポーネントをクリックするとプロパティが表示されます。";
+      propertyPanel.appendChild(empty);
+      return;
+    }
+
+    const heading = document.createElement("div");
+    heading.className = "mb-3";
+    heading.innerHTML = `
+      <div class="fw-semibold">${component.component}</div>
+      <div class="text-muted small">ID: ${component.id}</div>
+    `;
+    propertyPanel.appendChild(heading);
+
+    const fields = [];
+    const makeField = (labelText, inputEl) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "property-field";
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      wrapper.appendChild(label);
+      wrapper.appendChild(inputEl);
+      return wrapper;
+    };
+
+    if (component.component === "Text") {
+      const textInput = document.createElement("input");
+      textInput.type = "text";
+      textInput.className = "form-control form-control-sm";
+      textInput.value = component.text || "";
+      textInput.addEventListener("input", () => {
+        component.text = textInput.value;
+        updateTextNode(component);
+        if (component.id === "form_title") {
+          updateFormSpecTitle(component.text, undefined);
+        } else if (component.id === "form_description") {
+          updateFormSpecDescription(component.text);
+        }
+        syncButtonLabel(component);
+      });
+      fields.push(makeField("テキスト", textInput));
+
+      const sizeInput = document.createElement("input");
+      sizeInput.type = "number";
+      sizeInput.min = "8";
+      sizeInput.placeholder = "未設定";
+      sizeInput.className = "form-control form-control-sm";
+      sizeInput.value = component.style?.fontSize ?? "";
+      sizeInput.addEventListener("input", () => {
+        const raw = sizeInput.value.trim();
+        if (!raw) {
+          if (component.style) {
+            delete component.style.fontSize;
+            if (!Object.keys(component.style).length) {
+              delete component.style;
+            }
+          }
+          updateTextNode(component);
+          if (component.id === "form_title") {
+            updateFormSpecTitle(component.text || "", null);
+          }
+          return;
+        }
+        const nextSize = Number(raw);
+        if (!Number.isFinite(nextSize)) {
+          return;
+        }
+        component.style = component.style || {};
+        component.style.fontSize = nextSize;
+        updateTextNode(component);
+        if (component.id === "form_title") {
+          updateFormSpecTitle(component.text || "", nextSize);
+        }
+      });
+      fields.push(makeField("フォントサイズ", sizeInput));
+
+      const colorInput = document.createElement("input");
+      colorInput.type = "text";
+      colorInput.placeholder = "#000000";
+      colorInput.className = "form-control form-control-sm";
+      colorInput.value = component.style?.color ?? "";
+      colorInput.addEventListener("input", () => {
+        const nextColor = colorInput.value.trim();
+        component.style = component.style || {};
+        if (!nextColor) {
+          delete component.style.color;
+          if (!Object.keys(component.style).length) {
+            delete component.style;
+          }
+        } else {
+          component.style.color = nextColor;
+        }
+        updateTextNode(component);
+        if (component.id === "form_title") {
+          updateFormSpecTitleColor(nextColor);
+        } else if (component.id === "form_description") {
+          updateFormSpecDescriptionColor(nextColor);
+        }
+      });
+      fields.push(makeField("文字色", colorInput));
+    }
+
+    if (
+      component.component === "TextField" ||
+      component.component === "NumberField" ||
+      component.component === "DateField" ||
+      component.component === "DateTimeField" ||
+      component.component === "TimeField" ||
+      component.component === "EmailField" ||
+      component.component === "TelField" ||
+      component.component === "UrlField" ||
+      component.component === "PasswordField" ||
+      component.component === "TextArea" ||
+      component.component === "Select" ||
+      component.component === "MultiSelect" ||
+      component.component === "RadioGroup" ||
+      component.component === "SwitchField" ||
+      component.component === "RangeField" ||
+      component.component === "CurrencyField" ||
+      component.component === "FileField" ||
+      component.component === "CheckboxField"
+    ) {
+      const labelGroup = document.createElement("div");
+      labelGroup.className = "property-group";
+      const labelGroupTitle = document.createElement("div");
+      labelGroupTitle.className = "property-group__title";
+      labelGroupTitle.textContent = "ラベル";
+      labelGroup.appendChild(labelGroupTitle);
+
+      const labelInput = document.createElement("input");
+      labelInput.type = "text";
+      labelInput.className = "form-control form-control-sm";
+      labelInput.value = component.label || "";
+      labelInput.addEventListener("input", () => {
+        component.label = labelInput.value;
+        updateLabelNode(component);
+        updateFieldSpecLabel(component.fieldId, component.label);
+      });
+      labelGroup.appendChild(makeField("テキスト", labelInput));
+
+      const labelSizeInput = document.createElement("input");
+      labelSizeInput.type = "number";
+      labelSizeInput.min = "8";
+      labelSizeInput.placeholder = "未設定";
+      labelSizeInput.className = "form-control form-control-sm";
+      labelSizeInput.value = component.labelStyle?.fontSize ?? "";
+      labelSizeInput.addEventListener("input", () => {
+        const raw = labelSizeInput.value.trim();
+        component.labelStyle = component.labelStyle || {};
+        if (!raw) {
+          delete component.labelStyle.fontSize;
+        } else {
+          const nextSize = Number(raw);
+          if (!Number.isFinite(nextSize)) {
+            return;
+          }
+          component.labelStyle.fontSize = nextSize;
+        }
+        updateLabelNode(component);
+        updateFieldSpecLabelStyle(
+          component.fieldId,
+          component.labelStyle || {}
+        );
+      });
+      labelGroup.appendChild(makeField("サイズ", labelSizeInput));
+
+      const labelBoldInput = document.createElement("input");
+      labelBoldInput.type = "checkbox";
+      labelBoldInput.className = "form-check-input";
+      labelBoldInput.checked = component.labelStyle?.fontWeight === "700";
+      labelBoldInput.addEventListener("change", () => {
+        component.labelStyle = component.labelStyle || {};
+        if (labelBoldInput.checked) {
+          component.labelStyle.fontWeight = "700";
+        } else {
+          delete component.labelStyle.fontWeight;
+        }
+        updateLabelNode(component);
+        updateFieldSpecLabelStyle(
+          component.fieldId,
+          component.labelStyle || {}
+        );
+      });
+      labelGroup.appendChild(makeField("太字", labelBoldInput));
+
+      const labelColorInput = document.createElement("input");
+      labelColorInput.type = "text";
+      labelColorInput.placeholder = "#111827";
+      labelColorInput.className = "form-control form-control-sm";
+      labelColorInput.value = component.labelStyle?.color ?? "";
+      labelColorInput.addEventListener("input", () => {
+        const nextColor = labelColorInput.value.trim();
+        component.labelStyle = component.labelStyle || {};
+        if (!nextColor) {
+          delete component.labelStyle.color;
+        } else {
+          component.labelStyle.color = nextColor;
+        }
+        updateLabelNode(component);
+        updateFieldSpecLabelStyle(
+          component.fieldId,
+          component.labelStyle || {}
+        );
+      });
+      labelGroup.appendChild(makeField("文字色", labelColorInput));
+
+      fields.push(labelGroup);
+
+      const placeholderInput = document.createElement("input");
+      placeholderInput.type = "text";
+      placeholderInput.className = "form-control form-control-sm";
+      placeholderInput.value = component.placeholder || "";
+      placeholderInput.addEventListener("input", () => {
+        component.placeholder = placeholderInput.value.trim();
+        updateFieldSpecPlaceholder(component.fieldId, component.placeholder);
+        const node = componentNodes.get(component.id);
+        const input =
+          node?.querySelector("input") || node?.querySelector("textarea");
+        if (input && "placeholder" in input) {
+          input.placeholder = component.placeholder;
+        }
+      });
+      fields.push(makeField("プレースホルダー", placeholderInput));
+
+      const sizeInput = document.createElement("input");
+      sizeInput.type = "number";
+      sizeInput.min = "8";
+      sizeInput.placeholder = "未設定";
+      sizeInput.className = "form-control form-control-sm";
+      sizeInput.value = component.style?.fontSize ?? "";
+      sizeInput.addEventListener("input", () => {
+        const raw = sizeInput.value.trim();
+        component.style = component.style || {};
+        if (!raw) {
+          delete component.style.fontSize;
+        } else {
+          const nextSize = Number(raw);
+          if (!Number.isFinite(nextSize)) {
+            return;
+          }
+          component.style.fontSize = nextSize;
+        }
+        updateInputNodeStyle(component);
+        updateFieldSpecStyle(component.fieldId, component.style || {});
+      });
+      fields.push(makeField("サイズ", sizeInput));
+
+      const colorInput = document.createElement("input");
+      colorInput.type = "text";
+      colorInput.placeholder = "#111827";
+      colorInput.className = "form-control form-control-sm";
+      colorInput.value = component.style?.color ?? "";
+      colorInput.addEventListener("input", () => {
+        const nextColor = colorInput.value.trim();
+        component.style = component.style || {};
+        if (!nextColor) {
+          delete component.style.color;
+        } else {
+          component.style.color = nextColor;
+        }
+        updateInputNodeStyle(component);
+        updateFieldSpecStyle(component.fieldId, component.style || {});
+      });
+      fields.push(makeField("文字色", colorInput));
+
+      const bgInput = document.createElement("input");
+      bgInput.type = "text";
+      bgInput.placeholder = "#ffffff";
+      bgInput.className = "form-control form-control-sm";
+      bgInput.value = component.style?.backgroundColor ?? "";
+      bgInput.addEventListener("input", () => {
+        const nextColor = bgInput.value.trim();
+        component.style = component.style || {};
+        if (!nextColor) {
+          delete component.style.backgroundColor;
+        } else {
+          component.style.backgroundColor = nextColor;
+        }
+        updateInputNodeStyle(component);
+        updateFieldSpecStyle(component.fieldId, component.style || {});
+      });
+      fields.push(makeField("背景色", bgInput));
+
+      const widthInput = document.createElement("input");
+      widthInput.type = "text";
+      widthInput.placeholder = "例: 240px / 100%";
+      widthInput.className = "form-control form-control-sm";
+      widthInput.value = component.style?.width ?? "";
+      widthInput.addEventListener("input", () => {
+        const nextValue = widthInput.value.trim();
+        component.style = component.style || {};
+        if (!nextValue) {
+          delete component.style.width;
+        } else {
+          component.style.width = nextValue;
+        }
+        updateInputNodeStyle(component);
+        updateFieldSpecStyle(component.fieldId, component.style || {});
+      });
+      fields.push(makeField("幅", widthInput));
+
+      const heightInput = document.createElement("input");
+      heightInput.type = "text";
+      heightInput.placeholder = "例: 40px";
+      heightInput.className = "form-control form-control-sm";
+      heightInput.value = component.style?.height ?? "";
+      heightInput.addEventListener("input", () => {
+        const nextValue = heightInput.value.trim();
+        component.style = component.style || {};
+        if (!nextValue) {
+          delete component.style.height;
+        } else {
+          component.style.height = nextValue;
+        }
+        updateInputNodeStyle(component);
+        updateFieldSpecStyle(component.fieldId, component.style || {});
+      });
+      fields.push(makeField("高さ", heightInput));
+
+      const valueField = component.value?.path
+        ? getValueByPath(surfaceState.dataModel, component.value.path)
+        : "";
+      if (
+        component.component === "CheckboxField" ||
+        component.component === "SwitchField"
+      ) {
+        const defaultInput = document.createElement("input");
+        defaultInput.type = "checkbox";
+        defaultInput.className = "form-check-input";
+        defaultInput.checked = Boolean(valueField);
+        defaultInput.addEventListener("change", () => {
+          const nextValue = defaultInput.checked;
+          setComponentValue(component, nextValue);
+          updateFieldSpecDefaultValue(component.fieldId, nextValue);
+        });
+        fields.push(makeField("初期値", defaultInput));
+      } else if (component.component === "MultiSelect") {
+        const defaultInput = document.createElement("textarea");
+        defaultInput.className = "form-control form-control-sm";
+        defaultInput.rows = 3;
+        defaultInput.value = Array.isArray(valueField)
+          ? valueField.join(",")
+          : "";
+        defaultInput.addEventListener("input", () => {
+          const nextValue = defaultInput.value
+            .split(",")
+            .map((item) => item.trim())
+            .filter(Boolean);
+          setComponentValue(component, nextValue);
+          updateFieldSpecDefaultValue(component.fieldId, nextValue);
+        });
+        fields.push(makeField("初期値(カンマ区切り)", defaultInput));
+      } else if (component.component === "Select") {
+        const defaultInput = document.createElement("select");
+        defaultInput.className = "form-select form-select-sm";
+        (component.options || []).forEach((option) => {
+          const optionNode = document.createElement("option");
+          optionNode.value = option.value;
+          optionNode.textContent = option.label;
+          defaultInput.appendChild(optionNode);
+        });
+        defaultInput.value = valueField ?? "";
+        defaultInput.addEventListener("change", () => {
+          const nextValue = defaultInput.value;
+          setComponentValue(component, nextValue);
+          updateFieldSpecDefaultValue(component.fieldId, nextValue);
+        });
+        fields.push(makeField("初期値", defaultInput));
+      } else if (component.component === "RadioGroup") {
+        const defaultInput = document.createElement("select");
+        defaultInput.className = "form-select form-select-sm";
+        (component.options || []).forEach((option) => {
+          const optionNode = document.createElement("option");
+          optionNode.value = option.value;
+          optionNode.textContent = option.label;
+          defaultInput.appendChild(optionNode);
+        });
+        defaultInput.value = valueField ?? "";
+        defaultInput.addEventListener("change", () => {
+          const nextValue = defaultInput.value;
+          setComponentValue(component, nextValue);
+          updateFieldSpecDefaultValue(component.fieldId, nextValue);
+        });
+        fields.push(makeField("初期値", defaultInput));
+      } else if (
+        component.component === "NumberField" ||
+        component.component === "CurrencyField" ||
+        component.component === "RangeField"
+      ) {
+        const defaultInput = document.createElement("input");
+        defaultInput.type = "number";
+        defaultInput.className = "form-control form-control-sm";
+        defaultInput.value = valueField ?? "";
+        defaultInput.addEventListener("input", () => {
+          const nextValue = Number(defaultInput.value || 0);
+          setComponentValue(component, nextValue);
+          updateFieldSpecDefaultValue(component.fieldId, nextValue);
+        });
+        fields.push(makeField("初期値", defaultInput));
+      } else if (component.component !== "FileField") {
+        const defaultInput = document.createElement("input");
+        defaultInput.type = "text";
+        defaultInput.className = "form-control form-control-sm";
+        defaultInput.value = valueField ?? "";
+        defaultInput.addEventListener("input", () => {
+          const nextValue = defaultInput.value;
+          setComponentValue(component, nextValue);
+          updateFieldSpecDefaultValue(component.fieldId, nextValue);
+        });
+        fields.push(makeField("初期値", defaultInput));
+      }
+    }
+
+    if (
+      component.component === "Select" ||
+      component.component === "MultiSelect" ||
+      component.component === "RadioGroup"
+    ) {
+      const optionsArea = document.createElement("textarea");
+      optionsArea.className = "form-control form-control-sm";
+      optionsArea.rows = 4;
+      optionsArea.value = (component.options || [])
+        .map((option) => option.label)
+        .join("\n");
+      optionsArea.addEventListener("input", () => {
+        const nextOptions = optionsArea.value
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        component.options = nextOptions.map((option) => ({
+          label: option,
+          value: option,
+        }));
+        updateFieldSpecOptions(component.fieldId, nextOptions);
+        replaceComponentNode(component);
+      });
+      fields.push(makeField("選択肢", optionsArea));
+    }
+
+    if (component.component === "Button") {
+      const labelComponent = surfaceState.components.get(component.child);
+      const labelInput = document.createElement("input");
+      labelInput.type = "text";
+      labelInput.className = "form-control form-control-sm";
+      labelInput.value = labelComponent?.text || "";
+      labelInput.addEventListener("input", () => {
+        if (!labelComponent) {
+          return;
+        }
+        labelComponent.text = labelInput.value;
+        syncButtonLabel(labelComponent);
+      });
+      fields.push(makeField("ラベル", labelInput));
+
+      const sizeInput = document.createElement("input");
+      sizeInput.type = "number";
+      sizeInput.min = "8";
+      sizeInput.placeholder = "未設定";
+      sizeInput.className = "form-control form-control-sm";
+      sizeInput.value = component.style?.fontSize ?? "";
+      sizeInput.addEventListener("input", () => {
+        const raw = sizeInput.value.trim();
+        component.style = component.style || {};
+        if (!raw) {
+          delete component.style.fontSize;
+        } else {
+          const nextSize = Number(raw);
+          if (!Number.isFinite(nextSize)) {
+            return;
+          }
+          component.style.fontSize = nextSize;
+        }
+        updateButtonNode(component);
+      });
+      fields.push(makeField("サイズ", sizeInput));
+
+      const colorInput = document.createElement("input");
+      colorInput.type = "text";
+      colorInput.placeholder = "#ffffff";
+      colorInput.className = "form-control form-control-sm";
+      colorInput.value = component.style?.color ?? "";
+      colorInput.addEventListener("input", () => {
+        const nextColor = colorInput.value.trim();
+        component.style = component.style || {};
+        if (!nextColor) {
+          delete component.style.color;
+        } else {
+          component.style.color = nextColor;
+        }
+        updateButtonNode(component);
+      });
+      fields.push(makeField("文字色", colorInput));
+
+      const bgInput = document.createElement("input");
+      bgInput.type = "text";
+      bgInput.placeholder = "#1d4ed8";
+      bgInput.className = "form-control form-control-sm";
+      bgInput.value = component.style?.backgroundColor ?? "";
+      bgInput.addEventListener("input", () => {
+        const nextColor = bgInput.value.trim();
+        component.style = component.style || {};
+        if (!nextColor) {
+          delete component.style.backgroundColor;
+        } else {
+          component.style.backgroundColor = nextColor;
+        }
+        updateButtonNode(component);
+      });
+      fields.push(makeField("背景色", bgInput));
+
+      const widthInput = document.createElement("input");
+      widthInput.type = "text";
+      widthInput.placeholder = "例: 120px / 100%";
+      widthInput.className = "form-control form-control-sm";
+      widthInput.value = component.style?.width ?? "";
+      widthInput.addEventListener("input", () => {
+        const nextValue = widthInput.value.trim();
+        component.style = component.style || {};
+        if (!nextValue) {
+          delete component.style.width;
+        } else {
+          component.style.width = nextValue;
+        }
+        updateButtonNode(component);
+      });
+      fields.push(makeField("幅", widthInput));
+
+      const heightInput = document.createElement("input");
+      heightInput.type = "text";
+      heightInput.placeholder = "例: 40px";
+      heightInput.className = "form-control form-control-sm";
+      heightInput.value = component.style?.height ?? "";
+      heightInput.addEventListener("input", () => {
+        const nextValue = heightInput.value.trim();
+        component.style = component.style || {};
+        if (!nextValue) {
+          delete component.style.height;
+        } else {
+          component.style.height = nextValue;
+        }
+        updateButtonNode(component);
+      });
+      fields.push(makeField("高さ", heightInput));
+    }
+
+    if (fields.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "text-muted small mb-0";
+      empty.textContent =
+        "このコンポーネントには編集できるプロパティがありません。";
+      propertyPanel.appendChild(empty);
+      return;
+    }
+    fields.forEach((field) => propertyPanel.appendChild(field));
   }
 
   function applyDataModelUpdate(update) {
@@ -1532,6 +2539,7 @@ if (window.__A2UI_APP_INITIALIZED__) {
         container.appendChild(renderComponent(childComponent));
       }
     });
+    attachComponentNode(component, container);
     return container;
   }
 
@@ -1542,6 +2550,10 @@ if (window.__A2UI_APP_INITIALIZED__) {
     if (component.style?.fontSize) {
       text.style.fontSize = `${component.style.fontSize}px`;
     }
+    if (component.style?.color) {
+      text.style.color = component.style.color;
+    }
+    attachComponentNode(component, text);
     return text;
   }
 
@@ -1559,6 +2571,15 @@ if (window.__A2UI_APP_INITIALIZED__) {
     const label = document.createElement("label");
     label.className = "form-label";
     label.textContent = component.label || "未設定";
+    if (component.labelStyle?.fontSize) {
+      label.style.fontSize = `${component.labelStyle.fontSize}px`;
+    }
+    if (component.labelStyle?.fontWeight) {
+      label.style.fontWeight = String(component.labelStyle.fontWeight);
+    }
+    if (component.labelStyle?.color) {
+      label.style.color = component.labelStyle.color;
+    }
     wrapper.appendChild(label);
 
     let input;
@@ -1645,6 +2666,24 @@ if (window.__A2UI_APP_INITIALIZED__) {
     ) {
       input.classList.add("form-control");
     }
+    if (component.placeholder && "placeholder" in input) {
+      input.placeholder = component.placeholder;
+    }
+    if (component.style?.fontSize) {
+      input.style.fontSize = `${component.style.fontSize}px`;
+    }
+    if (component.style?.color) {
+      input.style.color = component.style.color;
+    }
+    if (component.style?.backgroundColor) {
+      input.style.backgroundColor = component.style.backgroundColor;
+    }
+    if (component.style?.width) {
+      input.style.width = normalizeSizeValue(component.style.width);
+    }
+    if (component.style?.height) {
+      input.style.height = normalizeSizeValue(component.style.height);
+    }
 
     const dataPath = component.value?.path;
     if (dataPath) {
@@ -1712,6 +2751,7 @@ if (window.__A2UI_APP_INITIALIZED__) {
 
     wrapper.appendChild(input);
     applyFieldDragProps(wrapper, component);
+    attachComponentNode(component, wrapper);
     return wrapper;
   }
 
@@ -1722,6 +2762,15 @@ if (window.__A2UI_APP_INITIALIZED__) {
     const label = document.createElement("label");
     label.className = "form-label";
     label.textContent = component.label || "未設定";
+    if (component.labelStyle?.fontSize) {
+      label.style.fontSize = `${component.labelStyle.fontSize}px`;
+    }
+    if (component.labelStyle?.fontWeight) {
+      label.style.fontWeight = String(component.labelStyle.fontWeight);
+    }
+    if (component.labelStyle?.color) {
+      label.style.color = component.labelStyle.color;
+    }
     wrapper.appendChild(label);
 
     const row = document.createElement("div");
@@ -1770,6 +2819,7 @@ if (window.__A2UI_APP_INITIALIZED__) {
     row.appendChild(valueText);
     wrapper.appendChild(row);
     applyFieldDragProps(wrapper, component);
+    attachComponentNode(component, wrapper);
     return wrapper;
   }
 
@@ -1816,6 +2866,7 @@ if (window.__A2UI_APP_INITIALIZED__) {
 
     wrapper.appendChild(group);
     applyFieldDragProps(wrapper, component);
+    attachComponentNode(component, wrapper);
     return wrapper;
   }
 
@@ -1832,6 +2883,15 @@ if (window.__A2UI_APP_INITIALIZED__) {
     const label = document.createElement("label");
     label.className = "form-check-label";
     label.textContent = component.label || "未設定";
+    if (component.labelStyle?.fontSize) {
+      label.style.fontSize = `${component.labelStyle.fontSize}px`;
+    }
+    if (component.labelStyle?.fontWeight) {
+      label.style.fontWeight = String(component.labelStyle.fontWeight);
+    }
+    if (component.labelStyle?.color) {
+      label.style.color = component.labelStyle.color;
+    }
 
     const dataPath = component.value?.path;
     if (dataPath) {
@@ -1845,16 +2905,40 @@ if (window.__A2UI_APP_INITIALIZED__) {
     wrapper.appendChild(input);
     wrapper.appendChild(label);
     applyFieldDragProps(wrapper, component);
+    attachComponentNode(component, wrapper);
     return wrapper;
   }
 
   function renderButton(component) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "align-self-start";
+
     const button = document.createElement("button");
-    button.className = "btn btn-primary align-self-start";
+    button.className = "btn btn-primary";
     const labelComponent = surfaceState.components.get(component.child);
     button.textContent = labelComponent?.text || "送信";
+    if (component.style?.fontSize) {
+      button.style.fontSize = `${component.style.fontSize}px`;
+    }
+    if (component.style?.color) {
+      button.style.color = component.style.color;
+    }
+    if (component.style?.backgroundColor) {
+      button.style.backgroundColor = component.style.backgroundColor;
+      button.style.borderColor = component.style.backgroundColor;
+    }
+    if (component.style?.width) {
+      button.style.width = normalizeSizeValue(component.style.width);
+    }
+    if (component.style?.height) {
+      button.style.height = normalizeSizeValue(component.style.height);
+    }
 
     button.addEventListener("click", () => {
+      if (suppressButtonSubmit) {
+        suppressButtonSubmit = false;
+        return;
+      }
       const context = {};
       if (component.action?.context) {
         Object.entries(component.action.context).forEach(([key, value]) => {
@@ -1888,8 +2972,16 @@ if (window.__A2UI_APP_INITIALIZED__) {
       });
       renderMessages(buildA2uiMessages(currentFormSpec));
     });
-
-    return button;
+    wrapper.addEventListener(
+      "click",
+      () => {
+        suppressButtonSubmit = true;
+      },
+      true
+    );
+    wrapper.appendChild(button);
+    attachComponentNode(component, wrapper);
+    return wrapper;
   }
 
   function applyFieldDragProps(wrapper, component) {
@@ -2076,6 +3168,7 @@ if (window.__A2UI_APP_INITIALIZED__) {
     bindEventOnce(saveAsButton, "click", handleSaveAsClick);
     bindEventOnce(saveNewButton, "click", handleSaveNewClick);
     bindEventOnce(newFormButton, "click", handleNewFormClick);
+    bindEventOnce(formSurface, "click", clearSelectedComponent);
     if (sidebarLinks.length > 0) {
       sidebarLinks.forEach((link) => {
         bindEventOnce(link, "click", handleSidebarLinkClick);

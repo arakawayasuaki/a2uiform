@@ -125,22 +125,11 @@
                   </svg>
                 </UButton>
               </div>
-              <div class="mt-3">
-                <label class="form-label" for="fontSelect">フォント</label>
-                <USelectMenu
-                  v-model="fontValue"
-                  :items="fontOptions"
-                  value-key="value"
-                  label-key="label"
-                  class="w-100"
-                />
-                <select id="fontSelect" class="d-none">
-                  <option value="system">システム</option>
-                  <option value="sans">Sans</option>
-                  <option value="serif">Serif</option>
-                  <option value="mono">Mono</option>
-                  <option value="rounded">Rounded</option>
-                </select>
+            </UCard>
+            <UCard class="shadow-sm mt-3">
+              <h2 class="h5 mb-3">プロパティ</h2>
+              <div id="propertyPanel" class="property-panel text-muted small">
+                コンポーネントをクリックするとプロパティが表示されます。
               </div>
             </UCard>
           </section>
@@ -185,36 +174,5 @@ useHead({
     { src: "/app-config.js", defer: true, body: true },
     { src: "/app.js", defer: true, body: true },
   ],
-});
-
-const fontOptions = [
-  { label: "システム", value: "system" },
-  { label: "Sans", value: "sans" },
-  { label: "Serif", value: "serif" },
-  { label: "Mono", value: "mono" },
-  { label: "Rounded", value: "rounded" },
-];
-const fontValue = ref("system");
-
-onMounted(() => {
-  const select = document.getElementById("fontSelect");
-  if (!(select instanceof HTMLSelectElement)) {
-    return;
-  }
-  const syncFromSelect = () => {
-    fontValue.value = select.value || "system";
-  };
-  syncFromSelect();
-  select.addEventListener("change", syncFromSelect);
-  watch(
-    fontValue,
-    (next) => {
-      const nextValue =
-        next && typeof next === "object" ? next.value ?? "" : next ?? "";
-      select.value = String(nextValue);
-      select.dispatchEvent(new Event("change", { bubbles: true }));
-    },
-    { immediate: false }
-  );
 });
 </script>

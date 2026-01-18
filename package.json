@@ -12,6 +12,7 @@
   "dependencies": {
     "@nuxt/ui": "4.3.0",
     "@vueuse/core": "^14.1.0",
+    "bpmn-js": "^18.10.1",
     "nuxt": "^4.2.2",
     "redis": "^4.7.0",
     "sortablejs": "^1.15.6",

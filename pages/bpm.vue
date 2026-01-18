@@ -187,11 +187,6 @@ useHead({
     },
   ],
   script: [
-    {
-      src: "https://cdn.jsdelivr.net/npm/bpmn-js@15.2.1/dist/bpmn-modeler.development.js",
-      defer: true,
-      body: true,
-    },
     { src: "/app-config.js", defer: true, body: true },
     { src: "/bpm.js", defer: true, body: true },
   ],

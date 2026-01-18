@@ -281,6 +281,10 @@ body {
   margin-top: 10px;
 }
 
+.report-cause__result {
+  margin-top: 10px;
+  white-space: pre-wrap;
+}
 .report-tables {
   margin-bottom: 24px;
 }
@@ -310,6 +314,10 @@ body {
 }
 
 .report-table-card.is-hidden {
+  display: none;
+}
+
+.report-chart-card.is-hidden {
   display: none;
 }
 

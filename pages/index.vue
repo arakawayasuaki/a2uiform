@@ -2,7 +2,14 @@
   <div class="app-shell">
     <aside class="app-sidebar">
       <div class="app-sidebar__title">メニュー</div>
+      <p class="app-sidebar__description text-muted small mb-3">
+        プロンプトでフォームを作成し、投稿データを帳票化してAI分析まで行える
+        ダッシュボードです。
+      </p>
       <nav class="nav flex-column">
+        <NuxtLink class="nav-link" exact-active-class="active" to="/guide">
+          利用者ガイド
+        </NuxtLink>
         <NuxtLink class="nav-link" exact-active-class="active" to="/">
           ページ作成
         </NuxtLink>

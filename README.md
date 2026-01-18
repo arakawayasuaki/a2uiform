@@ -1,75 +1,39 @@
-# Nuxt Minimal Starter
+# 利用者ガイド
 
-Look at the [Nuxt documentation](https://nuxt.com/docs/getting-started/introduction) to learn more.
+このシステムは、プロンプトでフォームを作成し、投稿データを帳票化して
+AI 分析まで行えるダッシュボードです。
 
-## Setup
+## 使い方
 
-Make sure to install dependencies:
+### 1. フォームを作成する
 
-```bash
-# npm
-npm install
+1. サイドバーの「ページ作成」を開きます。
+2. プロンプトに作りたいフォームを入力します。
+3. 「生成」でフォームを作成し、内容を確認します。
+4. 「保存」でフォームを保存します。
 
-# pnpm
-pnpm install
+例: 「経費精算フォームを作成して。項目は経費発生日、経費金額、経費カテゴリ」
 
-# yarn
-yarn install
+### 2. データを投稿する
 
-# bun
-bun install
-```
+作成したフォームに沿ってデータを入力し、投稿します。
 
-## Development Server
+### 3. 帳票を作成する
 
-Start the development server on `http://localhost:3000`:
+1. サイドバーの「帳票作成」を開きます。
+2. フォームと集計条件（横軸・縦軸・グラフ）を選択します。
+3. グラフと表で集計結果を確認します。
 
-```bash
-# npm
-npm run dev
+### 4. プロンプトで帳票を自動設定する
 
-# pnpm
-pnpm dev
+例: 「経費精算フォームで経費発生日別に経費金額を折れ線グラフで」
 
-# yarn
-yarn dev
+### 5. AI 分析（傾向/原因）を確認する
 
-# bun
-bun run dev
-```
+例: 「傾向を教えて」「原因を教えて」
 
-## Production
+## よくある質問
 
-Build the application for production:
-
-```bash
-# npm
-npm run build
-
-# pnpm
-pnpm build
-
-# yarn
-yarn build
-
-# bun
-bun run build
-```
-
-Locally preview production build:
-
-```bash
-# npm
-npm run preview
-
-# pnpm
-pnpm preview
-
-# yarn
-yarn preview
-
-# bun
-bun run preview
-```
-
-Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+- グラフが出ない: フォームに投稿データがあるか確認してください。
+- 日付が 1 日しか出ない: 横軸が「送信日」になっていないか確認してください。
+- AI 分析が出ない: 「傾向」「原因」などの指示を含めてください。

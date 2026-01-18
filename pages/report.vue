@@ -2,7 +2,14 @@
   <div class="app-shell">
     <aside class="app-sidebar">
       <div class="app-sidebar__title">メニュー</div>
+      <p class="app-sidebar__description text-muted small mb-3">
+        プロンプトでフォームを作成し、投稿データを帳票化してAI分析まで行える
+        ダッシュボードです。
+      </p>
       <nav class="nav flex-column">
+        <NuxtLink class="nav-link" exact-active-class="active" to="/guide">
+          利用者ガイド
+        </NuxtLink>
         <NuxtLink class="nav-link" exact-active-class="active" to="/">
           ページ作成
         </NuxtLink>
@@ -23,32 +30,6 @@
           </div>
           <div class="report-actions"></div>
         </header>
-
-        <section class="report-card report-prompt">
-          <div class="report-card__header">
-            <div>
-              <h2 class="h5 mb-1">プロンプトで作成</h2>
-              <p class="text-muted mb-0 small">
-                例: 「売上フォームの月別推移を折れ線で、金額を縦軸に」
-              </p>
-            </div>
-          </div>
-          <div class="report-prompt__row">
-            <input
-              id="reportPromptInput"
-              type="text"
-              class="form-control"
-              placeholder="例: 交通費フォームの申請日ごとの件数を棒グラフで"
-            />
-            <UButton id="reportPromptButton" color="primary"> 生成 </UButton>
-          </div>
-          <div
-            id="reportPromptResult"
-            class="report-prompt__result text-muted small"
-          >
-            プロンプトからフォーム・軸・グラフ種別を自動設定します。
-          </div>
-        </section>
 
         <section class="report-card report-tables">
           <div class="report-card__header">
@@ -102,7 +83,10 @@
         </div>
 
         <div class="report-grid">
-          <section class="report-card report-chart-card" id="reportChartCard">
+          <section
+            class="report-card report-chart-card is-hidden"
+            id="reportChartCard"
+          >
             <div class="report-card__header report-card__handle">
               <h2 class="h5 mb-0">集計グラフ</h2>
               <div class="report-card__actions">
@@ -167,7 +151,10 @@
               <canvas id="reportChart" height="120"></canvas>
             </div>
           </section>
-          <section class="report-card report-table-card" id="reportDataCard">
+          <section
+            class="report-card report-table-card is-hidden"
+            id="reportDataCard"
+          >
             <div class="report-card__header report-card__handle">
               <h2 class="h5 mb-0">集計テーブル</h2>
               <div class="report-card__actions">
@@ -231,6 +218,49 @@
             <div id="reportSheet" class="report-sheet"></div>
           </section>
         </div>
+
+        <section class="report-card report-cause">
+          <div class="report-card__header">
+            <div>
+              <h2 class="h5 mb-1">AI分析</h2>
+              <p class="text-muted mb-0 small">
+                日別の変化点と理由を推論します。
+              </p>
+            </div>
+          </div>
+          <div
+            id="reportCauseResult"
+            class="report-cause__result text-muted small"
+          >
+            推論結果をここに表示します。
+          </div>
+        </section>
+
+        <section class="report-card report-prompt">
+          <div class="report-card__header">
+            <div>
+              <h2 class="h5 mb-1">プロンプトで作成</h2>
+              <p class="text-muted mb-0 small">
+                例: 「売上フォームの月別推移を折れ線で、金額を縦軸に」
+              </p>
+            </div>
+          </div>
+          <div class="report-prompt__row">
+            <input
+              id="reportPromptInput"
+              type="text"
+              class="form-control"
+              placeholder="例: 交通費フォームの申請日ごとの件数を棒グラフで"
+            />
+            <UButton id="reportPromptButton" color="primary"> 実行 </UButton>
+          </div>
+          <div
+            id="reportPromptResult"
+            class="report-prompt__result text-muted small"
+          >
+            指示内容に応じてグラフ生成または原因推論を行います。
+          </div>
+        </section>
       </div>
     </div>
   </div>

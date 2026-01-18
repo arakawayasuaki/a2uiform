@@ -20,6 +20,7 @@
   let reportPromptInput = null;
   let reportPromptButton = null;
   let reportPromptResult = null;
+  let reportCauseResult = null;
   let reportTableList = null;
   let reportDataCard = null;
   let promptApplied = false;
@@ -28,6 +29,7 @@
   let forecastUnit = "auto";
   let forecastEndMonth = null;
   let forecastRequestId = 0;
+  let submissionsLoading = null;
   let reportChartCard = null;
   let reportChartMaximize = null;
   let reportTableMaximize = null;
@@ -41,6 +43,39 @@
   let currentReportItems = [];
   let sheetInstance = null;
   let delegateBound = false;
+
+  function isReportDebugEnabled() {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      if (params.get("debug") === "1" || params.get("debug") === "true") {
+        return true;
+      }
+    } catch (error) {
+      // ignore
+    }
+    try {
+      return localStorage.getItem("a2ui:report:debug") === "1";
+    } catch (error) {
+      return false;
+    }
+  }
+
+  function reportDebug(...args) {
+    if (!isReportDebugEnabled()) {
+      return;
+    }
+    const formatted = args.map((arg) => {
+      if (typeof arg === "string") {
+        return arg;
+      }
+      try {
+        return JSON.stringify(arg);
+      } catch (error) {
+        return String(arg);
+      }
+    });
+    console.log("[report]", ...formatted);
+  }
 
   function bindEventOnce(element, event, handler, options) {
     if (!element) {
@@ -72,6 +107,7 @@
     reportPromptInput = document.getElementById("reportPromptInput");
     reportPromptButton = document.getElementById("reportPromptButton");
     reportPromptResult = document.getElementById("reportPromptResult");
+    reportCauseResult = document.getElementById("reportCauseResult");
     reportTableList = document.getElementById("reportTableList");
     reportDataCard = document.getElementById("reportDataCard");
     reportChartCard = document.getElementById("reportChartCard");
@@ -134,12 +170,28 @@
     }
   }
 
+  function ensurePromptElements() {
+    if (!reportPromptInput || !reportPromptInput.isConnected) {
+      reportPromptInput = document.getElementById("reportPromptInput");
+    }
+    if (!reportPromptButton || !reportPromptButton.isConnected) {
+      reportPromptButton = document.getElementById("reportPromptButton");
+    }
+    if (!reportPromptResult || !reportPromptResult.isConnected) {
+      reportPromptResult = document.getElementById("reportPromptResult");
+    }
+    if (!reportCauseResult || !reportCauseResult.isConnected) {
+      reportCauseResult = document.getElementById("reportCauseResult");
+    }
+  }
+
   function handleDelegatedClick(event) {
     const target = event.target;
     if (!(target instanceof Element)) {
       return;
     }
     ensureCardElements();
+    ensurePromptElements();
     if (target.closest("#refreshReport")) {
       loadSubmissions();
       return;
@@ -169,7 +221,7 @@
       return;
     }
     if (target.closest("#reportPromptButton")) {
-      handlePromptGenerate();
+      handlePromptAction();
     }
   }
 
@@ -410,13 +462,7 @@
   }
 
   function shouldEnableForecast(prompt) {
-    const normalized = normalizePromptText(prompt);
-    return (
-      normalized.includes("予想") ||
-      normalized.includes("予測") ||
-      normalized.includes("forecast") ||
-      normalized.includes("見通し")
-    );
+    return false;
   }
 
   function getSelectOptions(select) {
@@ -473,6 +519,13 @@
       normalized.includes("日時別") ||
       normalized.includes("時系列")
     ) {
+      const nonCreatedOptions = options.filter(
+        (option) => option.value !== "__createdAt"
+      );
+      const matched = findBestOption(prompt, nonCreatedOptions);
+      if (matched) {
+        return matched;
+      }
       const dateOption = options.find(
         (option) => option.value === "__createdAt"
       );
@@ -555,9 +608,6 @@
 
   function applyPromptResult(prompt, parsed) {
     const formOptions = getSelectOptions(formSelect);
-    const columnOptions = getSelectOptions(reportColumnSelect);
-    const metricOptions = getSelectOptions(reportMetricSelect);
-
     const formValue =
       resolveOptionValue(parsed?.form, formOptions) ||
       findBestOption(prompt, formOptions);
@@ -568,24 +618,20 @@
     renderColumnOptions();
     renderMetricOptions();
 
+    const columnOptions = getSelectOptions(reportColumnSelect);
+    const metricOptions = getSelectOptions(reportMetricSelect);
     const columnValue =
       resolveOptionValue(parsed?.column, columnOptions) ||
-      resolveColumnFromPrompt(prompt, getSelectOptions(reportColumnSelect));
+      resolveColumnFromPrompt(prompt, columnOptions);
     const metricValue =
       resolveOptionValue(parsed?.metric, metricOptions) ||
-      resolveMetricFromPrompt(prompt, getSelectOptions(reportMetricSelect));
+      resolveMetricFromPrompt(prompt, metricOptions);
     const chartTypeValue =
       parsed?.chartType || resolveChartTypeFromPrompt(prompt);
-    const parsedForecast =
-      typeof parsed?.forecast === "boolean" ? parsed.forecast : null;
-    forecastEnabled =
-      parsedForecast !== null ? parsedForecast : shouldEnableForecast(prompt);
-    forecastSteps = resolveForecastStepsFromPrompt(
-      prompt,
-      parsed?.forecastSteps
-    );
-    forecastUnit = resolveForecastUnit(prompt);
-    forecastEndMonth = resolveForecastEndMonth(prompt);
+    forecastEnabled = false;
+    forecastSteps = 0;
+    forecastUnit = "auto";
+    forecastEndMonth = null;
 
     if (columnValue) {
       setSelectValue(reportColumnSelect, columnValue);
@@ -599,13 +645,9 @@
 
     promptApplied = true;
     renderReport();
+    refinePromptSelections(prompt);
     if (reportPromptResult) {
-      const forecastNote = forecastEnabled
-        ? forecastEndMonth
-          ? ` / 予想: ${forecastEndMonth}月末まで`
-          : ` / 予想: ${forecastSteps}期`
-        : "";
-      reportPromptResult.textContent = `${buildPromptResultText()}${forecastNote}`;
+      reportPromptResult.textContent = buildPromptResultText();
     }
   }
 
@@ -624,10 +666,10 @@
     const columnValue = resolveColumnFromPrompt(prompt, columnOptions);
     const metricValue = resolveMetricFromPrompt(prompt, metricOptions);
     const chartTypeValue = resolveChartTypeFromPrompt(prompt);
-    forecastEnabled = shouldEnableForecast(prompt);
-    forecastSteps = resolveForecastStepsFromPrompt(prompt, null);
-    forecastUnit = resolveForecastUnit(prompt);
-    forecastEndMonth = resolveForecastEndMonth(prompt);
+    forecastEnabled = false;
+    forecastSteps = 0;
+    forecastUnit = "auto";
+    forecastEndMonth = null;
 
     if (columnValue) {
       setSelectValue(reportColumnSelect, columnValue);
@@ -639,15 +681,197 @@
       setSelectValue(reportChartType, chartTypeValue);
     }
 
+    reportDebug("prompt_apply_local", {
+      prompt,
+      resolved: {
+        formValue,
+        columnValue,
+        metricValue,
+        chartTypeValue,
+      },
+      options: {
+        columns: columnOptions,
+        metrics: metricOptions,
+      },
+    });
+
     promptApplied = true;
     renderReport();
+    refinePromptSelections(prompt);
     if (reportPromptResult) {
-      const forecastNote = forecastEnabled
-        ? forecastEndMonth
-          ? ` / 予想: ${forecastEndMonth}月末まで`
-          : ` / 予想: ${forecastSteps}期`
-        : "";
-      reportPromptResult.textContent = `${buildPromptResultText()}${forecastNote}`;
+      reportPromptResult.textContent = buildPromptResultText();
+    }
+    return { mode: resolvePromptMode(prompt) };
+  }
+
+  function resolvePromptMode(prompt) {
+    const text = String(prompt || "").toLowerCase();
+    const causeKeywords = [
+      "原因",
+      "理由",
+      "なぜ",
+      "要因",
+      "コメント",
+      "説明",
+      "傾向",
+      "トレンド",
+      "増減",
+    ];
+    return causeKeywords.some((keyword) => text.includes(keyword))
+      ? "both"
+      : "chart";
+  }
+
+  function normalizePromptMode(mode, prompt) {
+    const normalized = String(mode || "").toLowerCase();
+    if (normalized === "both") {
+      return "both";
+    }
+    if (normalized === "cause") {
+      return "cause";
+    }
+    if (normalized === "chart") {
+      return "chart";
+    }
+    return resolvePromptMode(prompt);
+  }
+
+  function matchesAnyOption(prompt, options) {
+    if (!prompt || !Array.isArray(options) || options.length === 0) {
+      return false;
+    }
+    const normalized = normalizePromptText(prompt);
+    return options.some((option) => {
+      const label = normalizePromptText(option.label || "");
+      const value = normalizePromptText(option.value || "");
+      return (
+        (label && normalized.includes(label)) ||
+        (value && normalized.includes(value))
+      );
+    });
+  }
+
+  function isTrendOnlyPrompt(
+    prompt,
+    formOptions,
+    columnOptions,
+    metricOptions
+  ) {
+    const normalized = normalizePromptText(prompt);
+    const trendKeywords = ["傾向", "トレンド", "増減", "推移", "変化"];
+    const chartKeywords = [
+      "棒",
+      "折れ線",
+      "円",
+      "bar",
+      "line",
+      "pie",
+      "グラフ",
+    ];
+    const mentionsTrend = trendKeywords.some((keyword) =>
+      normalized.includes(keyword)
+    );
+    if (!mentionsTrend) {
+      return false;
+    }
+    if (chartKeywords.some((keyword) => normalized.includes(keyword))) {
+      return false;
+    }
+    const hasForm = matchesAnyOption(prompt, formOptions);
+    const hasColumn = matchesAnyOption(prompt, columnOptions);
+    const hasMetric = matchesAnyOption(prompt, metricOptions);
+    return !(hasForm || hasColumn || hasMetric);
+  }
+
+  function shouldPreferDateAxis(prompt) {
+    const normalized = normalizePromptText(prompt);
+    return (
+      normalized.includes("日別") ||
+      normalized.includes("月別") ||
+      normalized.includes("日付") ||
+      normalized.includes("発生日") ||
+      normalized.includes("日時")
+    );
+  }
+
+  function refinePromptSelections(prompt) {
+    if (!promptApplied || !reportColumnSelect) {
+      return;
+    }
+    if (!shouldPreferDateAxis(prompt)) {
+      return;
+    }
+    const columnOptions = getSelectOptions(reportColumnSelect);
+    const metricOptions = getSelectOptions(reportMetricSelect);
+    const nextColumn = resolveColumnFromPrompt(prompt, columnOptions);
+    const nextMetric = resolveMetricFromPrompt(prompt, metricOptions);
+    let changed = false;
+    if (
+      nextColumn &&
+      reportColumnSelect.value === "__createdAt" &&
+      nextColumn !== reportColumnSelect.value
+    ) {
+      changed = setSelectValue(reportColumnSelect, nextColumn) || changed;
+    }
+    if (nextMetric && reportMetricSelect?.value !== nextMetric) {
+      changed = setSelectValue(reportMetricSelect, nextMetric) || changed;
+    }
+    if (changed) {
+      renderReport();
+    }
+  }
+
+  async function ensureReportDataReady() {
+    const formOptionCount = formSelect?.options?.length ?? 0;
+    if (formOptionCount === 0 || allSubmissions.length === 0) {
+      await loadSubmissions();
+    }
+    if ((formSelect?.options?.length ?? 0) === 0) {
+      renderFormOptions();
+      renderColumnOptions();
+      renderMetricOptions();
+    }
+  }
+
+  async function handlePromptAction() {
+    ensurePromptElements();
+    const prompt = reportPromptInput?.value?.trim() || "";
+    if (!prompt) {
+      return;
+    }
+    await ensureReportDataReady();
+    const formOptions = getSelectOptions(formSelect);
+    const columnOptions = getSelectOptions(reportColumnSelect);
+    const metricOptions = getSelectOptions(reportMetricSelect);
+    reportDebug("prompt_action", {
+      prompt,
+      formCount: formSelect?.options?.length ?? 0,
+      columnCount: reportColumnSelect?.options?.length ?? 0,
+      metricCount: reportMetricSelect?.options?.length ?? 0,
+      selectedForm: formSelect?.value || "",
+      selectedColumn: reportColumnSelect?.value || "",
+      selectedMetric: reportMetricSelect?.value || "",
+    });
+    if (isTrendOnlyPrompt(prompt, formOptions, columnOptions, metricOptions)) {
+      if (reportPromptResult) {
+        reportPromptResult.textContent = "現在のデータで傾向推論を実行します。";
+      }
+      if (!currentReportItems.length) {
+        renderReport();
+      }
+      handleCauseGenerate();
+      return;
+    }
+    const decision = await handlePromptGenerate();
+    const mode = normalizePromptMode(decision?.mode, prompt);
+    if (reportPromptResult && mode === "both") {
+      reportPromptResult.textContent = "グラフ生成と傾向推論を実行します。";
+    }
+    if (mode === "cause" || mode === "both") {
+      if (!currentReportItems.length) {
+        renderReport();
+      }
+      handleCauseGenerate();
     }
   }
 
@@ -669,11 +893,10 @@
     const systemPrompt = [
       "あなたは帳票ダッシュボードのアシスタントです。",
       "次のJSONだけを返してください。",
-      '{ "form": string, "column": string, "metric": string, "chartType": "bar|line|pie", "forecast": boolean, "forecastSteps": number }',
+      '{ "form": string, "column": string, "metric": string, "chartType": "bar|line|pie", "mode": "chart|cause|both" }',
       "form/column/metric は候補の value または label から最も近いものを選ぶ。",
       "候補に該当がない場合は空文字にする。",
-      "forecast はユーザーが予想/予測/forecast を求めている場合に true。",
-      "forecastSteps は予測期間(1-12)。ユーザーが指定しない場合は入力欄の値を使う。",
+      "mode はユーザーの意図に合わせて選ぶ。傾向/原因/理由などがあれば cause または both。",
       "出力はJSONのみ。",
     ].join(" ");
     const userPrompt = [
@@ -722,11 +945,160 @@
         throw new Error("JSONの解析に失敗しました。");
       }
       applyPromptResult(prompt, parsed);
+      return { mode: parsed?.mode };
     } catch (error) {
+      reportDebug("prompt_ai_failed", {
+        error: String(error?.message || error),
+      });
       handlePromptGenerateLocal(prompt);
       if (reportPromptResult) {
         reportPromptResult.textContent = `${buildPromptResultText()} (AI解析に失敗したため簡易解析で設定しました)`;
       }
+      return { mode: resolvePromptMode(prompt) };
+    }
+  }
+
+  function buildCauseContext(items) {
+    const xField = reportColumnSelect?.value || "__createdAt";
+    const metricField = reportMetricSelect?.value || "__count";
+    const grouped = aggregateByField(items, xField, metricField);
+    const labels = grouped.map(([label]) => label);
+    const values = grouped.map(([, count]) => count);
+    const changes = [];
+    for (let i = 1; i < labels.length; i += 1) {
+      changes.push({
+        date: labels[i],
+        value: values[i],
+        delta: values[i] - values[i - 1],
+      });
+    }
+    changes.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+    const topChanges = changes.slice(0, 3);
+    const sampleMap = new Map();
+    topChanges.forEach((change) => {
+      const related = items.filter(
+        (item) => normalizeXAxisValue(item, xField) === change.date
+      );
+      sampleMap.set(
+        change.date,
+        related.slice(0, 5).map((item) => ({
+          createdAt: item.createdAt || "",
+          data: item.data || {},
+        }))
+      );
+    });
+    return {
+      formName: formSelect?.value || "",
+      xField,
+      metricField,
+      series: labels.map((label, index) => ({
+        date: label,
+        value: values[index],
+      })),
+      topChanges: topChanges.map((change) => ({
+        ...change,
+        samples: sampleMap.get(change.date) || [],
+      })),
+    };
+  }
+
+  function setCauseCardVisible(visible) {
+    if (!reportCauseResult) {
+      return;
+    }
+    const card = reportCauseResult.closest(".report-cause");
+    if (!card) {
+      return;
+    }
+    card.classList.toggle("is-hidden", !visible);
+  }
+
+  function renderCauseResult(result) {
+    if (!reportCauseResult) {
+      return;
+    }
+    setCauseCardVisible(true);
+    const explanations = Array.isArray(result?.explanations)
+      ? result.explanations
+      : [];
+    if (explanations.length === 0) {
+      reportCauseResult.textContent = "推論結果がありません。";
+      return;
+    }
+    reportCauseResult.textContent = explanations
+      .map((item) => {
+        const evidence = Array.isArray(item.evidence)
+          ? `\n  - 根拠: ${item.evidence.join(", ")}`
+          : "";
+        return `・${item.date}: 変化 ${item.change}\n  - 理由: ${item.reason}${evidence}`;
+      })
+      .join("\n\n");
+  }
+
+  async function handleCauseGenerate() {
+    ensurePromptElements();
+    if (!reportCauseResult) {
+      return;
+    }
+    const prompt = reportPromptInput?.value?.trim() || "";
+    const items = Array.isArray(currentReportItems) ? currentReportItems : [];
+    setCauseCardVisible(true);
+    if (items.length < 2) {
+      reportCauseResult.textContent = "推論に必要なデータが不足しています。";
+      return;
+    }
+    reportCauseResult.textContent = "推論中...";
+    const context = buildCauseContext(items);
+    const model = window.APP_CONFIG?.model || "gpt-4o-mini";
+    const systemPrompt = [
+      "あなたは業務データの変化原因を説明するアシスタントです。",
+      "次のJSONだけを返してください。",
+      '{ "explanations": [{ "date": string, "change": number, "reason": string, "evidence"?: string[] }] }',
+      "reason は具体的に。evidence は根拠となるデータの要約。",
+      "出力はJSONのみ。",
+    ].join(" ");
+    const userPrompt = [
+      "ユーザー指示:",
+      prompt || "変化の大きい日の原因を説明して",
+      "",
+      "データ:",
+      JSON.stringify(context),
+    ].join("\n");
+    try {
+      const response = await fetch("/api/openai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          temperature: 0.2,
+          response_format: { type: "json_object" },
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const data = await response.json();
+      const content =
+        data?.choices?.[0]?.message?.content ?? data?.output_text ?? "";
+      let parsed = null;
+      if (typeof content === "string") {
+        try {
+          parsed = JSON.parse(content);
+        } catch (error) {
+          parsed = extractJsonFromText(content);
+        }
+      }
+      if (!parsed) {
+        throw new Error("JSONの解析に失敗しました。");
+      }
+      renderCauseResult(parsed);
+    } catch (error) {
+      reportCauseResult.textContent =
+        "推論に失敗しました。再試行してください。";
     }
   }
 
@@ -1176,6 +1548,14 @@
     let labels = grouped.map(([label]) => label);
     let values = grouped.map(([, count]) => count);
 
+    reportDebug("render_chart", {
+      items: items.length,
+      xField,
+      metricField,
+      labels,
+      values,
+    });
+
     const metricLabel =
       metricField === "__count"
         ? "件数"
@@ -1354,6 +1734,10 @@
   }
 
   function renderReport() {
+    forecastEnabled = false;
+    forecastSteps = 0;
+    forecastUnit = "auto";
+    forecastEndMonth = null;
     const selected = formSelect?.value || "";
     let filtered = selected
       ? allSubmissions.filter((item) => getFormName(item) === selected)
@@ -1371,14 +1755,26 @@
       }
     }
     currentReportItems = filtered;
-    renderChart(filtered);
     if (promptApplied) {
+      renderChart(filtered);
+      if (reportChartCard) {
+        reportChartCard.classList.remove("is-hidden");
+      }
       renderSheet(filtered);
       if (reportDataCard) {
         reportDataCard.classList.remove("is-hidden");
       }
-    } else if (reportDataCard) {
-      reportDataCard.classList.add("is-hidden");
+    } else {
+      if (chartInstance) {
+        chartInstance.destroy();
+        chartInstance = null;
+      }
+      if (reportChartCard) {
+        reportChartCard.classList.add("is-hidden");
+      }
+      if (reportDataCard) {
+        reportDataCard.classList.add("is-hidden");
+      }
     }
   }
 
@@ -1504,6 +1900,7 @@
       : [];
     const resolvedSpec = getResolvedFormSpec(selected, filtered);
     const fields = resolvedSpec?.fields || filtered[0]?.formSpec?.fields || [];
+    const currentValue = reportColumnSelect.value || "";
     reportColumnSelect.innerHTML = "";
 
     const dateOption = document.createElement("option");
@@ -1517,8 +1914,19 @@
       option.textContent = field.label || field.id;
       reportColumnSelect.appendChild(option);
     });
-    reportColumnSelect.value = "__createdAt";
+    const hasCurrentValue = Array.from(reportColumnSelect.options).some(
+      (option) => option.value === currentValue
+    );
+    reportColumnSelect.value = hasCurrentValue ? currentValue : "__createdAt";
     reportColumnSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    reportDebug("render_columns", {
+      selected,
+      fields: fields.map((field) => ({
+        id: field.id,
+        label: field.label || field.id,
+        type: field.type,
+      })),
+    });
   }
 
   function renderMetricOptions() {
@@ -1534,6 +1942,7 @@
     const numericFields = fields.filter((field) =>
       numericFieldTypes.has(field.type)
     );
+    const currentValue = reportMetricSelect.value || "";
     reportMetricSelect.innerHTML = "";
 
     const countOption = document.createElement("option");
@@ -1548,9 +1957,23 @@
       reportMetricSelect.appendChild(option);
     });
     reportMetricSelect.disabled = false;
-    reportMetricSelect.value =
-      numericFields.length > 0 ? numericFields[0].id : "__count";
+    const hasCurrentValue = Array.from(reportMetricSelect.options).some(
+      (option) => option.value === currentValue
+    );
+    reportMetricSelect.value = hasCurrentValue
+      ? currentValue
+      : numericFields.length > 0
+      ? numericFields[0].id
+      : "__count";
     reportMetricSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    reportDebug("render_metrics", {
+      selected,
+      fields: numericFields.map((field) => ({
+        id: field.id,
+        label: field.label || field.id,
+        type: field.type,
+      })),
+    });
   }
 
   const localSubmissionsKey = "a2ui:submissions";
@@ -1703,34 +2126,45 @@
   }
 
   async function loadSubmissions() {
-    const localItems = flattenSubmissions(readLocalSubmissions());
+    if (submissionsLoading) {
+      return submissionsLoading;
+    }
+    const task = (async () => {
+      const localItems = flattenSubmissions(readLocalSubmissions());
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/submissions`);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        const rawItems = Array.isArray(data.items) ? data.items : [];
+        const remoteItems = flattenSubmissions(rawItems);
+        allSubmissions = mergeSubmissions(remoteItems, localItems);
+      } catch (error) {
+        console.error("report_load_failed", error);
+        allSubmissions = localItems;
+      }
+      if (allSubmissions.length === 0) {
+        const savedForms = readSavedForms();
+        const samples = savedForms.flatMap((entry) =>
+          buildSampleEntries(entry?.formSpec)
+        );
+        if (samples.length > 0) {
+          appendLocalSubmissions(samples);
+          allSubmissions = samples;
+        }
+      }
+      renderFormOptions();
+      renderColumnOptions();
+      renderMetricOptions();
+      renderReport();
+    })();
+    submissionsLoading = task;
     try {
-      const response = await fetch(`${apiBaseUrl}/api/submissions`);
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const data = await response.json();
-      const rawItems = Array.isArray(data.items) ? data.items : [];
-      const remoteItems = flattenSubmissions(rawItems);
-      allSubmissions = mergeSubmissions(remoteItems, localItems);
-    } catch (error) {
-      console.error("report_load_failed", error);
-      allSubmissions = localItems;
+      await task;
+    } finally {
+      submissionsLoading = null;
     }
-    if (allSubmissions.length === 0) {
-      const savedForms = readSavedForms();
-      const samples = savedForms.flatMap((entry) =>
-        buildSampleEntries(entry?.formSpec)
-      );
-      if (samples.length > 0) {
-        appendLocalSubmissions(samples);
-        allSubmissions = samples;
-      }
-    }
-    renderFormOptions();
-    renderColumnOptions();
-    renderMetricOptions();
-    renderReport();
   }
 
   function handleFormChange() {
@@ -1748,11 +2182,11 @@
       bindEventOnce(exportExcel, "click", exportReportToExcel);
     }
     bindEventOnce(refreshReport, "click", loadSubmissions);
-    bindEventOnce(reportPromptButton, "click", handlePromptGenerate);
+    bindEventOnce(reportPromptButton, "click", handlePromptAction);
     bindEventOnce(reportPromptInput, "keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
-        handlePromptGenerate();
+        handlePromptAction();
       }
     });
     bindEventOnce(document, "click", handleDelegatedClick, { capture: true });
@@ -1792,6 +2226,11 @@
       bindEventOnce(document, "click", handleDelegatedClick);
       delegateBound = true;
     }
+    ensurePromptElements();
+    if (reportCauseResult) {
+      reportCauseResult.textContent = "";
+    }
+    setCauseCardVisible(false);
     loadSubmissions();
     if (reportDataCard) {
       reportDataCard.classList.add("is-hidden");

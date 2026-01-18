@@ -15,6 +15,10 @@
           <div>帳票分析</div>
           <div class="text-muted small">（集計・グラフ・AI分析）</div>
         </NuxtLink>
+        <NuxtLink class="nav-link" exact-active-class="active" to="/bpm">
+          <div>BPM</div>
+          <div class="text-muted small">（BPMNを生成）</div>
+        </NuxtLink>
         <a class="nav-link" href="/guide.html">
           利用者ガイド
         </a>

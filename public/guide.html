@@ -26,6 +26,10 @@
             <div>帳票分析</div>
             <div class="text-muted small">（集計・グラフ・AI分析）</div>
           </a>
+          <a class="nav-link" href="/bpm">
+            <div>BPM</div>
+            <div class="text-muted small">（BPMNを生成）</div>
+          </a>
           <a class="nav-link active" href="/guide.html">利用者ガイド</a>
         </nav>
       </aside>
@@ -85,6 +89,20 @@
             </p>
           </section>
 
+          <section class="mb-4">
+            <h2 class="h5 mb-2">6. BPMNで業務フローを可視化する</h2>
+            <ol class="text-muted">
+              <li>「BPM」へ移動します。</li>
+              <li>プロンプト上のサンプルをクリックするか、自由に入力します。</li>
+              <li>Enterで生成（改行はShift+Enter）します。</li>
+              <li>生成された図はドラッグして配置を調整できます。</li>
+              <li>「保存」でフローを保存し、下部の「保存済みフロー」から再読み込みします。</li>
+            </ol>
+            <p class="text-muted small mb-0">
+              例: 「採用稟議フォームで、起案→部門長承認→人事承認→役員承認→完了、差戻しは起案者へ」
+            </p>
+          </section>
+
           <section>
             <h2 class="h5 mb-2">よくある質問</h2>
             <ul class="text-muted">
@@ -97,6 +115,9 @@
               </li>
               <li>
                 AI分析が出ない: 「傾向」「原因」などの指示を含めてください。
+              </li>
+              <li>
+                BPMNが表示されない: プロンプトにフォーム名を含め、短めの手順で再生成してください。
               </li>
             </ul>
           </section>

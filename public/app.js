@@ -6,6 +6,7 @@ if (window.__A2UI_APP_INITIALIZED__) {
 
   let promptInput = null;
   let generateButton = null;
+  let promptSampleButtons = [];
   let formSurface = null;
   let formSpinner = null;
   let searchResults = null;
@@ -57,6 +58,9 @@ if (window.__A2UI_APP_INITIALIZED__) {
   function bindElements() {
     promptInput = document.getElementById("promptInput");
     generateButton = document.getElementById("generateButton");
+    promptSampleButtons = Array.from(
+      document.querySelectorAll("[data-prompt-sample]")
+    );
     formSurface = document.getElementById("formSurface");
     formSpinner = document.getElementById("formSpinner");
     searchResults = document.getElementById("searchResults");
@@ -3059,6 +3063,17 @@ if (window.__A2UI_APP_INITIALIZED__) {
     if (searchResults) {
       searchResults.classList.toggle("d-none", isLoading || !isSearchMode);
     }
+    if (generateButton) {
+      const label = generateButton.querySelector("[data-generate-label]");
+      const defaultText =
+        generateButton.dataset.defaultText || "フォームを生成";
+      const loadingText =
+        generateButton.dataset.loadingText || "フォームを生成しています…";
+      if (label) {
+        label.textContent = isLoading ? loadingText : defaultText;
+      }
+      generateButton.toggleAttribute("disabled", isLoading);
+    }
   }
 
   async function handleGenerate() {
@@ -3137,6 +3152,20 @@ if (window.__A2UI_APP_INITIALIZED__) {
     resetForm();
   }
 
+  function handlePromptSampleClick(event) {
+    const target = event.currentTarget;
+    if (!promptInput || !(target instanceof HTMLElement)) {
+      return;
+    }
+    const sample = target.dataset.promptSample || "";
+    if (!sample) {
+      return;
+    }
+    promptInput.value = sample;
+    promptInput.focus();
+    promptInput.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   function handleSidebarLinkClick() {
     cleanupUnsavedFormData();
   }
@@ -3169,6 +3198,11 @@ if (window.__A2UI_APP_INITIALIZED__) {
     bindEventOnce(saveNewButton, "click", handleSaveNewClick);
     bindEventOnce(newFormButton, "click", handleNewFormClick);
     bindEventOnce(formSurface, "click", clearSelectedComponent);
+    if (promptSampleButtons.length > 0) {
+      promptSampleButtons.forEach((button) => {
+        bindEventOnce(button, "click", handlePromptSampleClick);
+      });
+    }
     if (sidebarLinks.length > 0) {
       sidebarLinks.forEach((link) => {
         bindEventOnce(link, "click", handleSidebarLinkClick);

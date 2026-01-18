@@ -7,15 +7,17 @@
         ダッシュボードです。
       </p>
       <nav class="nav flex-column">
-        <NuxtLink class="nav-link" exact-active-class="active" to="/guide">
-          利用者ガイド
-        </NuxtLink>
         <NuxtLink class="nav-link" exact-active-class="active" to="/">
-          ページ作成
+          <div>フォーム作成</div>
+          <div class="text-muted small">（入力UIを生成・編集）</div>
         </NuxtLink>
         <NuxtLink class="nav-link" exact-active-class="active" to="/report">
-          帳票作成
+          <div>帳票分析</div>
+          <div class="text-muted small">（集計・グラフ・AI分析）</div>
         </NuxtLink>
+        <a class="nav-link" href="/guide.html">
+          利用者ガイド
+        </a>
       </nav>
     </aside>
     <div class="app-content report-page">
@@ -23,9 +25,18 @@
         <header class="report-hero">
           <div>
             <p class="report-kicker">Data Insights</p>
-            <h1 class="report-title">帳票作成ダッシュボード</h1>
-            <p class="report-subtitle">
+            <h1 class="report-title">帳票（集計・分析）</h1>
+            <p class="text-muted mb-1">
+              保存済みデータを集計・可視化し、AIで分析します
+            </p>
+            <p class="report-subtitle text-muted">
               登録済みデータをフォーム別に集計し、可視化と一覧で確認します。
+            </p>
+            <p class="text-muted mb-1">
+              保存済みデータをフォーム別に集計し、グラフ・一覧・AI分析で確認します
+            </p>
+            <p class="text-muted small mb-0">
+              フォーム入力結果をもとに、社内提出用の帳票を生成します
             </p>
           </div>
           <div class="report-actions"></div>
@@ -34,9 +45,9 @@
         <section class="report-card report-tables">
           <div class="report-card__header">
             <div>
-              <h2 class="h5 mb-1">参照可能なテーブル</h2>
+              <h2 class="h5 mb-1">利用可能なデータ（DBスキーマ／テーブル）</h2>
               <p class="text-muted mb-0 small">
-                保存済みフォームまたは投稿データから取得します。
+                現在データベースに存在するテーブル一覧です
               </p>
             </div>
           </div>
@@ -82,6 +93,9 @@
           </select>
         </div>
 
+        <div class="mt-4">
+          <h2 class="h6 mb-0">集計結果（プロンプト実行後に表示）</h2>
+        </div>
         <div class="report-grid">
           <section
             class="report-card report-chart-card is-hidden"
@@ -222,7 +236,7 @@
         <section class="report-card report-cause">
           <div class="report-card__header">
             <div>
-              <h2 class="h5 mb-1">AI分析</h2>
+              <h2 class="h5 mb-1">AI分析結果（自動生成）</h2>
               <p class="text-muted mb-0 small">
                 日別の変化点と理由を推論します。
               </p>
@@ -239,9 +253,12 @@
         <section class="report-card report-prompt">
           <div class="report-card__header">
             <div>
-              <h2 class="h5 mb-1">プロンプトで作成</h2>
+              <h2 class="h5 mb-1">分析指示（ここに入力）</h2>
+              <p class="text-muted mb-1 small">
+                使用するテーブルや集計方法、グラフ形式はここで指示します
+              </p>
               <p class="text-muted mb-0 small">
-                例: 「売上フォームの月別推移を折れ線で、金額を縦軸に」
+                例: 「sales_table を使って月別売上推移を折れ線グラフで表示」
               </p>
             </div>
           </div>
@@ -250,7 +267,7 @@
               id="reportPromptInput"
               type="text"
               class="form-control"
-              placeholder="例: 交通費フォームの申請日ごとの件数を棒グラフで"
+              placeholder="例: sales_table を使って月別売上推移を折れ線グラフで表示"
             />
             <UButton id="reportPromptButton" color="primary"> 実行 </UButton>
           </div>
@@ -260,6 +277,9 @@
           >
             指示内容に応じてグラフ生成または原因推論を行います。
           </div>
+          <p class="text-muted small mb-0 mt-2">
+            例: 「2024年12月に売上が急増した理由を分析」
+          </p>
         </section>
       </div>
     </div>

@@ -34,7 +34,12 @@
           <section class="col-12">
             <UCard id="bpmResultCard" class="shadow-sm bpm-card is-hidden">
               <div class="d-flex justify-content-between align-items-center mb-2">
-                <h2 class="h5 mb-0">生成結果</h2>
+                <div>
+                  <h2 class="h5 mb-1">生成結果</h2>
+                  <p class="text-muted small mb-0">
+                    プロンプトで生成したBPMNをここに表示します。
+                  </p>
+                </div>
                 <div class="d-flex gap-2">
                   <UButton
                     id="bpmSaveButton"
@@ -81,7 +86,7 @@
             <UCard class="shadow-sm">
               <h2 id="bpmPromptTitle" class="h5 mb-2">生成指示</h2>
               <p class="text-muted small mb-3">
-                使用するフォーム名を含めて、業務フローを文章で入力してください。
+                関連するフォーム名や担当部門を含めて、業務フローを文章で入力してください。
               </p>
               <div id="bpmPromptSamples" class="d-flex flex-wrap gap-2 mb-3">
                 <button

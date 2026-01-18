@@ -1,6 +1,8 @@
 import { getRedisClient } from "../utils/redis";
 
-const SUBMISSIONS_KEY = "a2uiform:submissions";
+const TIMELINE_KEY = "a2uiform:timeline";
+const SUBMISSION_PREFIX = "a2uiform:submission:";
+const FORM_INDEX_PREFIX = "a2uiform:index:form:";
 
 export default defineEventHandler(async (event) => {
   const query = getQuery(event);
@@ -14,25 +16,34 @@ export default defineEventHandler(async (event) => {
 
   try {
     const redis = await getRedisClient();
-    const items = await redis.lRange(SUBMISSIONS_KEY, 0, -1);
-    const parsed = items
-      .map((item: string) => {
-        try {
-          return JSON.parse(item);
-        } catch (error) {
-          return null;
-        }
-      })
-      .filter(Boolean) as Array<Record<string, unknown>>;
-    const remaining = parsed.filter(
-      (item) => item.formName === undefined || item.formName !== formName
-    );
-    await redis.del(SUBMISSIONS_KEY);
-    if (remaining.length > 0) {
-      const payloads = remaining.map((entry) => JSON.stringify(entry));
-      await redis.lPush(SUBMISSIONS_KEY, payloads);
+    const formIndexKey = `${FORM_INDEX_PREFIX}${formName}`;
+    
+    // Get all IDs belonging to this form
+    const ids = await redis.sMembers(formIndexKey);
+    
+    if (ids.length === 0) {
+       return { ok: true, removed: 0 };
     }
-    return { ok: true, removed: parsed.length - remaining.length };
+
+    const pipeline = redis.multi();
+    
+    // 1. Delete actual data keys
+    const dataKeys = ids.map(id => `${SUBMISSION_PREFIX}${id}`);
+    pipeline.del(dataKeys);
+    
+    // 2. Remove IDs from timeline
+    // LREM removes elements matching the value. 
+    // Ideally we should process this carefully if the list is huge, but it's better than fetching everything.
+    ids.forEach(id => {
+        pipeline.lRem(TIMELINE_KEY, 0, id);
+    });
+
+    // 3. Delete the index itself
+    pipeline.del(formIndexKey);
+
+    await pipeline.exec();
+
+    return { ok: true, removed: ids.length };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw createError({

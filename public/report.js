@@ -39,6 +39,7 @@
   const boundHandlers = new WeakMap();
 
   let allSubmissions = [];
+  let allForms = [];
   let chartInstance = null;
   let currentReportItems = [];
   let sheetInstance = null;
@@ -1025,14 +1026,43 @@
       reportCauseResult.textContent = "推論結果がありません。";
       return;
     }
-    reportCauseResult.textContent = explanations
+    const escapeHtml = (value) =>
+      String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    reportCauseResult.innerHTML = explanations
       .map((item) => {
-        const evidence = Array.isArray(item.evidence)
-          ? `\n  - 根拠: ${item.evidence.join(", ")}`
-          : "";
-        return `・${item.date}: 変化 ${item.change}\n  - 理由: ${item.reason}${evidence}`;
+        const title = item.date ?? "";
+        const change = item.change ?? "";
+        const reason = item.reason ?? "";
+        const evidenceList = Array.isArray(item.evidence) ? item.evidence : [];
+        const evidenceHtml =
+          evidenceList.length > 0
+            ? `<ul class="list-disc pl-5 mt-2 space-y-1">${evidenceList
+                .map((entry) => `<li>${escapeHtml(entry)}</li>`)
+                .join("")}</ul>`
+            : "";
+        return `
+          <div class="border-b border-gray-200 pb-3 mb-3 last:border-b-0 last:mb-0 last:pb-0">
+            <div class="font-semibold text-gray-900">
+              ${escapeHtml(title)}
+              <span class="ml-2 text-sm text-gray-500">変化 ${escapeHtml(
+                change
+              )}</span>
+            </div>
+            <div class="mt-1 text-gray-700">理由: ${escapeHtml(reason)}</div>
+            ${
+              evidenceHtml
+                ? `<div class="mt-2 text-sm text-gray-600">根拠:${evidenceHtml}</div>`
+                : ""
+            }
+          </div>
+        `;
       })
-      .join("\n\n");
+      .join("");
   }
 
   async function handleCauseGenerate() {
@@ -1155,17 +1185,73 @@
   }
 
   function getSavedFormSpecMap() {
-    const entries = readSavedForms();
+    const entries = allForms.length > 0 ? allForms : readSavedForms();
     const map = new Map();
     entries.forEach((entry) => {
       const rawSpec = parseJsonValue(entry?.formSpec);
       const spec = rawSpec && typeof rawSpec === "object" ? rawSpec : null;
       const title = spec?.title || entry?.name || "";
-      if (title && Array.isArray(spec?.fields) && spec.fields.length > 0) {
+      const hasLegacyFields =
+        Array.isArray(spec?.fields) && spec.fields.length > 0;
+      const hasComponents =
+        spec?.components && typeof spec.components === "object";
+      if (title && (hasLegacyFields || hasComponents)) {
         map.set(title, spec);
       }
     });
     return map;
+  }
+
+  function getFieldsFromData(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return [];
+    }
+    const sample = items.find(
+      (item) =>
+        item &&
+        ((typeof item.data === "object" && item.data !== null) ||
+          typeof item.data === "string")
+    );
+    if (!sample) {
+      return [];
+    }
+    if (typeof sample.data === "string") {
+      const rows = parseKeyValueRows(sample.data);
+      const keys = new Set();
+      rows.forEach((row) => {
+        Object.keys(row || {}).forEach((key) => keys.add(key));
+      });
+      const fallback = parseKeyValueString(sample.data).map(({ key }) => key);
+      (keys.size ? Array.from(keys) : fallback).forEach((key) =>
+        keys.add(key)
+      );
+      return Array.from(keys).map((key) => ({
+        id: key,
+        label: key,
+        type: "text",
+      }));
+    }
+    if (Array.isArray(sample.data)) {
+      const firstObject = sample.data.find(
+        (entry) => entry && typeof entry === "object"
+      );
+      if (!firstObject || typeof firstObject !== "object") {
+        return [];
+      }
+      return Object.keys(firstObject).map((key) => {
+        const value = firstObject[key];
+        const type = typeof value === "number" ? "number" : "text";
+        return { id: key, label: key, type };
+      });
+    }
+    if (typeof sample.data !== "object" || sample.data === null) {
+      return [];
+    }
+    return Object.keys(sample.data).map((key) => {
+      const value = sample.data[key];
+      const type = typeof value === "number" ? "number" : "text";
+      return { id: key, label: key, type };
+    });
   }
 
   function getResolvedFormSpec(formName, items) {
@@ -1186,6 +1272,57 @@
     return null;
   }
 
+  function getFieldsFromFormSpec(spec) {
+    if (!spec || typeof spec !== "object") {
+      return [];
+    }
+    if (Array.isArray(spec.fields) && spec.fields.length > 0) {
+      return spec.fields;
+    }
+    const components = spec.components || {};
+    const inputTypes = new Set([
+      "TextField",
+      "LocalTextField",
+      "EmailField",
+      "TelField",
+      "UrlField",
+      "NumberField",
+      "CurrencyField",
+      "DateField",
+      "Select",
+      "RadioGroup",
+      "CheckboxField",
+      "Switch",
+      "Textarea",
+      "Multiselect",
+    ]);
+    return Object.values(components)
+      .filter(
+        (component) =>
+          component &&
+          typeof component === "object" &&
+          inputTypes.has(component.component)
+      )
+      .map((component) => ({
+        id: component.id,
+        label: component.label || component.text || component.id,
+        type:
+          component.component === "NumberField" ||
+          component.component === "CurrencyField"
+            ? "number"
+            : "text",
+      }));
+  }
+
+  function resolveFieldsForItems(formName, items) {
+    const resolvedSpec = getResolvedFormSpec(formName, items);
+    const specFields = getFieldsFromFormSpec(resolvedSpec);
+    if (specFields.length > 0) {
+      return specFields;
+    }
+    return getFieldsFromData(items);
+  }
+
   function formatDateTime(value) {
     if (!value) {
       return "-";
@@ -1197,18 +1334,189 @@
     }
   }
 
-  function formatJson(value) {
+  function escapeRegExp(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function parseKeyValueString(value) {
+    if (!value || typeof value !== "string") {
+      return [];
+    }
+    const parts = value
+      .split(/[;\t]/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    return parts
+      .map((part) => {
+        const index = part.indexOf(":");
+        if (index === -1) {
+          return null;
+        }
+        const key = part.slice(0, index).trim();
+        const rawValue = part.slice(index + 1).trim();
+        return key ? { key, value: rawValue } : null;
+      })
+      .filter(Boolean);
+  }
+
+  function parseKeyValueRows(value) {
+    if (!value || typeof value !== "string") {
+      return [];
+    }
+    const rowStrings = value
+      .split(/\r?\n|\t+/)
+      .map((row) => row.trim())
+      .filter(Boolean);
+    return rowStrings
+      .map((row) => {
+        const entries = parseKeyValueString(row);
+        if (entries.length === 0) {
+          return null;
+        }
+        const obj = {};
+        entries.forEach(({ key, value: entryValue }) => {
+          if (key) {
+            obj[key] = entryValue;
+          }
+        });
+        return Object.keys(obj).length ? obj : null;
+      })
+      .filter(Boolean);
+  }
+
+  function getFieldValue(item, fieldId) {
+    if (!item || !fieldId) {
+      return undefined;
+    }
+    const data = item.data;
+    if (Array.isArray(data)) {
+      const firstObject = data.find(
+        (entry) => entry && typeof entry === "object"
+      );
+      if (firstObject && typeof firstObject === "object") {
+        return firstObject[fieldId];
+      }
+    }
+    if (data && typeof data === "object") {
+      return data[fieldId];
+    }
+    if (typeof data === "string") {
+      const entries = parseKeyValueString(data);
+      const match = entries.find(({ key }) => key === fieldId);
+      return match ? match.value : undefined;
+    }
+    return undefined;
+  }
+
+  function expandReportItems(items) {
+    if (!Array.isArray(items) || items.length === 0) {
+      return [];
+    }
+    const expanded = [];
+    items.forEach((item) => {
+      if (Array.isArray(item?.data)) {
+        const rows = item.data.filter(
+          (entry) => entry && typeof entry === "object"
+        );
+        if (rows.length > 0) {
+          rows.forEach((row) => {
+            expanded.push({ ...item, data: row });
+          });
+          return;
+        }
+      }
+      if (typeof item?.data === "string") {
+        const rows = parseKeyValueRows(item.data);
+        if (rows.length > 0) {
+          rows.forEach((row) => {
+            expanded.push({ ...item, data: row });
+          });
+          return;
+        }
+      }
+      expanded.push(item);
+    });
+    return expanded;
+  }
+
+  function formatJson(value, fieldId = "") {
     if (value === null || value === undefined) {
       return "-";
     }
+    if (typeof value === "boolean") {
+      return value ? "はい" : "いいえ";
+    }
+    if (typeof value === "number") {
+      return Number.isFinite(value) ? String(value) : "-";
+    }
     if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (fieldId && trimmed.includes(":")) {
+        const escaped = escapeRegExp(fieldId);
+        const match = trimmed.match(
+          new RegExp(`${escaped}\\s*[:：]\\s*([^;\\t]+)`, "i")
+        );
+        if (match && match[1]) {
+          return match[1].trim() || "-";
+        }
+      }
+      if (
+        fieldId &&
+        (trimmed === fieldId ||
+          trimmed === `${fieldId}:` ||
+          trimmed === `${fieldId}：`)
+      ) {
+        return "-";
+      }
       return value;
     }
-    try {
-      return JSON.stringify(value);
-    } catch (error) {
-      return String(value);
+    if (Array.isArray(value)) {
+      const entries = value
+        .map((entry) => formatJson(entry, fieldId))
+        .filter((entry) => entry !== "-" && entry !== "");
+      return entries.join(", ") || "-";
     }
+    if (typeof value === "object") {
+      if (fieldId && Object.prototype.hasOwnProperty.call(value, fieldId)) {
+        return formatJson(value[fieldId], fieldId);
+      }
+      if (fieldId) {
+        const matchKey = Object.keys(value).find(
+          (key) => key === fieldId || key.endsWith(`.${fieldId}`)
+        );
+        if (matchKey) {
+          return formatJson(value[matchKey], fieldId);
+        }
+      }
+      if (fieldId && Object.prototype.hasOwnProperty.call(value, "value")) {
+        return formatJson(value.value, fieldId);
+      }
+      if (fieldId && Object.prototype.hasOwnProperty.call(value, "label")) {
+        return formatJson(value.label, fieldId);
+      }
+      if (fieldId && Object.prototype.hasOwnProperty.call(value, fieldId)) {
+        return formatJson(value[fieldId], fieldId);
+      }
+      const keys = Object.keys(value);
+      if (keys.length === 1) {
+        return formatJson(value[keys[0]], fieldId);
+      }
+      const named =
+        value.name ||
+        value.label ||
+        value.title ||
+        value.value ||
+        value.id ||
+        "";
+      if (typeof named === "string" && named) {
+        return named;
+      }
+      const entries = Object.entries(value)
+        .map(([key, entryValue]) => `${key}: ${formatJson(entryValue, fieldId)}`)
+        .join("; ");
+      return entries || "[object]";
+    }
+    return String(value);
   }
 
   const numericFieldTypes = new Set(["number", "currency", "numberRange"]);
@@ -1217,7 +1525,7 @@
     if (fieldKey === "__createdAt") {
       return (item.createdAt || "").split("T")[0] || "unknown";
     }
-    let rawValue = item.data?.[fieldKey];
+    let rawValue = getFieldValue(item, fieldKey);
     if (Array.isArray(rawValue)) {
       rawValue = rawValue.join(", ");
     }
@@ -1754,13 +2062,13 @@
         }
       }
     }
-    currentReportItems = filtered;
+    currentReportItems = expandReportItems(filtered);
     if (promptApplied) {
-      renderChart(filtered);
+      renderChart(currentReportItems);
       if (reportChartCard) {
         reportChartCard.classList.remove("is-hidden");
       }
-      renderSheet(filtered);
+      renderSheet(currentReportItems);
       if (reportDataCard) {
         reportDataCard.classList.remove("is-hidden");
       }
@@ -1780,14 +2088,14 @@
 
   function buildExportRows(items) {
     const selectedFormName = formSelect?.value || getFormName(items[0]) || "";
-    const resolvedSpec = getResolvedFormSpec(selectedFormName, items);
-    if (resolvedSpec?.fields?.length) {
-      const fieldIds = resolvedSpec.fields.map((field) => field.id);
-      const headers = resolvedSpec.fields.map(
-        (field) => field.label || field.id
-      );
+    const fields = resolveFieldsForItems(selectedFormName, items);
+    if (fields.length) {
+      const fieldIds = fields.map((field) => field.id);
+      const headers = fields.map((field) => field.label || field.id);
       const rows = items.map((item) =>
-        fieldIds.map((fieldId) => formatJson(item.data?.[fieldId]))
+        fieldIds.map((fieldId) =>
+          formatJson(getFieldValue(item, fieldId), fieldId)
+        )
       );
       return { headers, rows };
     }
@@ -1802,7 +2110,7 @@
     const fieldIds = Array.from(fieldMap.keys());
     const headers = fieldIds.map((id) => fieldMap.get(id) || id);
     const rows = items.map((item) =>
-      fieldIds.map((fieldId) => formatJson(item.data?.[fieldId]))
+      fieldIds.map((fieldId) => formatJson(getFieldValue(item, fieldId), fieldId))
     );
     return { headers, rows };
   }
@@ -1866,7 +2174,7 @@
     reportTableList.innerHTML = "";
     if (!Array.isArray(formNames) || formNames.length === 0) {
       const empty = document.createElement("div");
-      empty.className = "text-muted small";
+      empty.className = "text-gray-500 text-sm";
       empty.textContent = "参照できるテーブルがありません。";
       reportTableList.appendChild(empty);
       return;
@@ -1878,6 +2186,9 @@
     formNames.forEach((name) => {
       const chip = document.createElement("div");
       chip.className = "report-table-chip";
+      if (formSelect && formSelect.value === name) {
+        chip.classList.add("is-active");
+      }
       chip.textContent = name;
       const count = countMap.get(name);
       if (count) {
@@ -1886,6 +2197,12 @@
         countNode.textContent = `(${count})`;
         chip.appendChild(countNode);
       }
+      chip.addEventListener("click", () => {
+        if (formSelect) {
+            formSelect.value = name;
+            formSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+      });
       reportTableList.appendChild(chip);
     });
   }
@@ -1898,8 +2215,7 @@
     const filtered = selected
       ? allSubmissions.filter((item) => getFormName(item) === selected)
       : [];
-    const resolvedSpec = getResolvedFormSpec(selected, filtered);
-    const fields = resolvedSpec?.fields || filtered[0]?.formSpec?.fields || [];
+    const fields = resolveFieldsForItems(selected, filtered);
     const currentValue = reportColumnSelect.value || "";
     reportColumnSelect.innerHTML = "";
 
@@ -1937,8 +2253,7 @@
     const filtered = selected
       ? allSubmissions.filter((item) => getFormName(item) === selected)
       : [];
-    const resolvedSpec = getResolvedFormSpec(selected, filtered);
-    const fields = resolvedSpec?.fields || filtered[0]?.formSpec?.fields || [];
+    const fields = resolveFieldsForItems(selected, filtered);
     const numericFields = fields.filter((field) =>
       numericFieldTypes.has(field.type)
     );
@@ -2131,21 +2446,36 @@
     }
     const task = (async () => {
       const localItems = flattenSubmissions(readLocalSubmissions());
+      const [submissionsRes, formsRes] = await Promise.all([
+        fetch(`${apiBaseUrl}/api/submissions`).catch(() => null),
+        fetch(`${apiBaseUrl}/api/forms`).catch(() => null)
+      ]);
+
       try {
-        const response = await fetch(`${apiBaseUrl}/api/submissions`);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+        if (submissionsRes && submissionsRes.ok) {
+            const data = await submissionsRes.json();
+            const rawItems = Array.isArray(data.items) ? data.items : [];
+            const remoteItems = flattenSubmissions(rawItems);
+            allSubmissions = mergeSubmissions(remoteItems, localItems);
+        } else {
+             throw new Error(submissionsRes ? `HTTP ${submissionsRes.status}` : 'Fetch failed');
         }
-        const data = await response.json();
-        const rawItems = Array.isArray(data.items) ? data.items : [];
-        const remoteItems = flattenSubmissions(rawItems);
-        allSubmissions = mergeSubmissions(remoteItems, localItems);
       } catch (error) {
         console.error("report_load_failed", error);
         allSubmissions = localItems;
       }
+
+      try {
+        if (formsRes && formsRes.ok) {
+            const forms = await formsRes.json();
+            allForms = Array.isArray(forms) ? forms : [];
+        }
+      } catch (error) {
+         console.error("report_load_forms_failed", error);
+      }
+
       if (allSubmissions.length === 0) {
-        const savedForms = readSavedForms();
+        const savedForms = allForms.length > 0 ? allForms : readSavedForms();
         const samples = savedForms.flatMap((entry) =>
           buildSampleEntries(entry?.formSpec)
         );

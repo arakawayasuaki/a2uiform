@@ -22,7 +22,28 @@
   let currentXml = "";
   let lastPrompt = "";
   let savedFlows = [];
+  let initTries = 0;
+  let coreInitialized = false;
+  const boundHandlers = new WeakMap();
   const STORAGE_KEY = "bpm_saved_flows";
+
+  function bindEventOnce(element, event, handler, options) {
+    if (!element) {
+      return;
+    }
+    let eventMap = boundHandlers.get(element);
+    if (!eventMap) {
+      eventMap = new Map();
+      boundHandlers.set(element, eventMap);
+    }
+    const handlers = eventMap.get(event) || new Set();
+    if (handlers.has(handler)) {
+      return;
+    }
+    handlers.add(handler);
+    eventMap.set(event, handlers);
+    element.addEventListener(event, handler, options);
+  }
 
   function bindElements() {
     promptInput = document.getElementById("bpmPromptInput");
@@ -39,16 +60,25 @@
     saveButton = document.getElementById("bpmSaveButton");
     savedList = document.getElementById("bpmSavedList");
     promptTitle = document.getElementById("bpmPromptTitle");
-    const samples = document.querySelectorAll("#bpmPromptSamples [data-prompt]");
-    samples.forEach((button) => {
-      button.addEventListener("click", () => {
-        const prompt = button.getAttribute("data-prompt") || "";
-        if (promptInputEl) {
-          promptInputEl.value = prompt;
-          promptInputEl.focus();
-        }
-      });
-    });
+  }
+
+  function handleDelegatedClick(event) {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+    const sampleButton = target.closest("#bpmPromptSamples [data-prompt]");
+    if (!sampleButton) {
+      return;
+    }
+    const prompt = sampleButton.getAttribute("data-prompt") || "";
+    if (!promptInputEl) {
+      bindElements();
+    }
+    if (promptInputEl) {
+      promptInputEl.value = prompt;
+      promptInputEl.focus();
+    }
   }
 
   function setStatus(message) {
@@ -177,20 +207,22 @@
     savedList.innerHTML = "";
     if (!savedFlows.length) {
       const empty = document.createElement("div");
-      empty.className = "text-muted small";
+      empty.className = "text-gray-500 text-sm";
       empty.textContent = "保存済みフローはありません。";
       savedList.appendChild(empty);
       return;
     }
     savedFlows.forEach((flow) => {
       const row = document.createElement("div");
-      row.className = "d-flex align-items-center gap-2";
+      row.className =
+        "flex items-center gap-2 border border-gray-200 rounded-md px-3 py-2 bg-white";
       const title = document.createElement("div");
-      title.className = "flex-grow-1";
+      title.className = "flex-1 text-sm text-gray-700";
       title.textContent = flow.name || "無題フロー";
       const loadButton = document.createElement("button");
       loadButton.type = "button";
-      loadButton.className = "btn btn-sm btn-outline-secondary";
+      loadButton.className =
+        "border border-gray-300 text-gray-600 text-xs px-3 py-1 rounded hover:bg-gray-50 pointer-events-auto";
       loadButton.textContent = "読み込み";
       loadButton.addEventListener("click", async () => {
         currentXml = flow.xml || "";
@@ -964,20 +996,13 @@
   }
 
   function bindEvents() {
-    if (generateButton) {
-      generateButton.addEventListener("click", handleGenerate);
-    }
-    if (resultMaximize) {
-      resultMaximize.addEventListener("click", toggleMaximize);
-    }
-    if (resultReset) {
-      resultReset.addEventListener("click", resetCardPosition);
-    }
-    if (saveButton) {
-      saveButton.addEventListener("click", saveCurrentFlow);
-    }
+    bindEventOnce(generateButton, "click", handleGenerate);
+    bindEventOnce(resultMaximize, "click", toggleMaximize);
+    bindEventOnce(resultReset, "click", resetCardPosition);
+    bindEventOnce(saveButton, "click", saveCurrentFlow);
+    bindEventOnce(document, "click", handleDelegatedClick);
     if (promptInputEl) {
-      promptInputEl.addEventListener("keydown", (event) => {
+      bindEventOnce(promptInputEl, "keydown", (event) => {
         if (event.key === "Enter" && !event.shiftKey) {
           event.preventDefault();
           handleGenerate();
@@ -988,16 +1013,21 @@
 
   function init() {
     bindElements();
-    if (!promptInputEl) {
+    bindEvents();
+    if (!coreInitialized && promptInputEl && canvas) {
+      coreInitialized = true;
+      console.info("bpm_init");
+      ensureViewer();
+      setResultVisible(false);
+      setPromptMode(false);
+      loadSavedFlows();
+      renderSavedList();
       return;
     }
-    console.info("bpm_init");
-    bindEvents();
-    ensureViewer();
-    setResultVisible(false);
-    setPromptMode(false);
-    loadSavedFlows();
-    renderSavedList();
+    if (!coreInitialized && initTries < 20) {
+      initTries += 1;
+      setTimeout(init, 100);
+    }
   }
 
   init();

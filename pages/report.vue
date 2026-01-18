@@ -1,290 +1,159 @@
 <template>
-  <div class="app-shell">
-    <aside class="app-sidebar">
-      <div class="app-sidebar__title">メニュー</div>
-      <p class="app-sidebar__description text-muted small mb-3">
-        プロンプトでフォームを作成し、投稿データを帳票化してAI分析まで行える
-        ダッシュボードです。
-      </p>
-      <nav class="nav flex-column">
-        <NuxtLink class="nav-link" exact-active-class="active" to="/">
-          <div>フォーム作成</div>
-          <div class="text-muted small">（入力UIを生成・編集）</div>
-        </NuxtLink>
-        <NuxtLink class="nav-link" exact-active-class="active" to="/report">
-          <div>帳票分析</div>
-          <div class="text-muted small">（集計・グラフ・AI分析）</div>
-        </NuxtLink>
-        <NuxtLink class="nav-link" exact-active-class="active" to="/bpm">
-          <div>BPM</div>
-          <div class="text-muted small">（BPMNを生成）</div>
-        </NuxtLink>
-        <a class="nav-link" href="/guide.html">
-          利用者ガイド
-        </a>
-      </nav>
-    </aside>
-    <div class="app-content report-page">
-      <div class="container py-4">
-        <header class="report-hero">
-          <div>
-            <p class="report-kicker">Data Insights</p>
-            <h1 class="report-title">帳票（集計・分析）</h1>
-            <p class="text-muted mb-1">
-              保存済みデータを集計・可視化し、AIで分析します
-            </p>
-            <p class="report-subtitle text-muted">
-              登録済みデータをフォーム別に集計し、可視化と一覧で確認します。
-            </p>
-            <p class="text-muted mb-1">
-              保存済みデータをフォーム別に集計し、グラフ・一覧・AI分析で確認します
-            </p>
-            <p class="text-muted small mb-0">
-              フォーム入力結果をもとに、社内提出用の帳票を生成します
-            </p>
-          </div>
-          <div class="report-actions"></div>
-        </header>
+  <div class="min-h-screen flex flex-col bg-gray-50" data-theme="light">
+    <div class="flex flex-1">
+      <!-- Sidebar -->
+      <aside class="w-64 bg-white border-r border-gray-200 flex-shrink-0 flex flex-col p-4">
+        <div class="font-bold text-lg mb-2 text-gray-900">メニュー</div>
+        <p class="text-gray-500 text-xs mb-6">
+          プロンプトでフォームを作成し、投稿データを帳票化してAI分析まで行えるダッシュボードです。
+        </p>
+        <nav class="space-y-1">
+          <NuxtLink
+            to="/"
+            class="group flex flex-col px-3 py-2 text-sm font-medium rounded-md hover:bg-gray-50 hover:text-gray-900"
+            active-class="bg-gray-100 text-gray-900"
+          >
+            <span class="font-semibold">フォーム作成</span>
+            <span class="text-xs text-gray-500 group-hover:text-gray-600">（入力UIを生成・編集）</span>
+          </NuxtLink>
+          <NuxtLink
+            to="/report"
+            class="group flex flex-col px-3 py-2 text-sm font-medium rounded-md hover:bg-gray-50 hover:text-gray-900"
+            active-class="bg-gray-100 text-gray-900"
+          >
+            <span class="font-semibold">帳票分析</span>
+            <span class="text-xs text-gray-500 group-hover:text-gray-600">（集計・グラフ・AI分析）</span>
+          </NuxtLink>
+          <NuxtLink
+            to="/bpm"
+            class="group flex flex-col px-3 py-2 text-sm font-medium rounded-md hover:bg-gray-50 hover:text-gray-900"
+            active-class="bg-gray-100 text-gray-900"
+          >
+            <span class="font-semibold">BPM</span>
+            <span class="text-xs text-gray-500 group-hover:text-gray-600">（BPMNを生成）</span>
+          </NuxtLink>
+          <NuxtLink
+            to="/guide"
+            class="flex items-center px-3 py-2 text-sm font-medium rounded-md text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+            active-class="bg-gray-100 text-gray-900"
+          >
+            利用者ガイド
+          </NuxtLink>
+        </nav>
+      </aside>
 
-        <section class="report-card report-tables">
-          <div class="report-card__header">
-            <div>
-              <h2 class="h5 mb-1">利用可能なデータ（DBスキーマ／テーブル）</h2>
-              <p class="text-muted mb-0 small">
-                現在データベースに存在するテーブル一覧です
-              </p>
-            </div>
-          </div>
-          <div id="reportTableList" class="report-table-list"></div>
-        </section>
+      <!-- Main Content -->
+      <div class="flex-1 overflow-auto">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <header class="mb-8">
+            <h1 class="text-2xl font-bold text-gray-900 mb-2">生成データの帳票・分析</h1>
+            <p class="text-gray-600 mb-1">
+              入力されたデータの一覧表示、集計グラフ、AIによる分析結果を表示します
+            </p>
+          </header>
 
-        <div class="d-none">
-          <USelectMenu
-            v-model="formValue"
-            :items="formItems"
-            value-key="value"
-            label-key="label"
-            class="w-100 report-select"
-          />
-          <select id="reportFormSelect" class="d-none"></select>
-          <USelectMenu
-            v-model="columnValue"
-            :items="columnItems"
-            value-key="value"
-            label-key="label"
-            class="w-100 report-select"
-          />
-          <select id="reportColumnSelect" class="d-none"></select>
-          <USelectMenu
-            v-model="metricValue"
-            :items="metricItems"
-            value-key="value"
-            label-key="label"
-            class="w-100 report-select"
-          />
-          <select id="reportMetricSelect" class="d-none"></select>
-          <USelectMenu
-            v-model="chartTypeValue"
-            :items="chartTypeItems"
-            value-key="value"
-            label-key="label"
-            class="w-100 report-select"
-          />
-          <select id="reportChartType" class="d-none">
-            <option value="bar">棒グラフ</option>
-            <option value="line">折れ線</option>
-            <option value="pie">円グラフ</option>
-          </select>
+          <main class="grid grid-cols-1 gap-6">
+             <!-- Schema / Data Availability -->
+             <section>
+              <UCard>
+                <div class="flex justify-between items-center mb-4">
+                  <div>
+                    <h2 class="text-lg font-medium text-gray-900">利用可能なデータ（DBスキーマ／テーブル）</h2>
+                    <p class="text-xs text-gray-500">
+                      現在データベースに存在するテーブル一覧です
+                    </p>
+                  </div>
+                </div>
+                <div id="reportTableList" class="report-table-list text-sm text-gray-700"></div>
+              </UCard>
+             </section>
+
+             <!-- Hidden Selects for JS binding -->
+             <div class="hidden">
+               <USelectMenu v-model="formValue" :items="formItems" value-key="value" label-key="label" class="w-full report-select" />
+               <select id="reportFormSelect" class="hidden"></select>
+               <USelectMenu v-model="columnValue" :items="columnItems" value-key="value" label-key="label" class="w-full report-select" />
+               <select id="reportColumnSelect" class="hidden"></select>
+               <USelectMenu v-model="metricValue" :items="metricItems" value-key="value" label-key="label" class="w-full report-select" />
+               <select id="reportMetricSelect" class="hidden"></select>
+               <USelectMenu v-model="chartTypeValue" :items="chartTypeItems" value-key="value" label-key="label" class="w-full report-select" />
+               <select id="reportChartType" class="hidden">
+                 <option value="bar">棒グラフ</option>
+                 <option value="line">折れ線</option>
+                 <option value="pie">円グラフ</option>
+               </select>
+             </div>
+
+             <!-- Prompt Section -->
+             <section>
+               <UCard>
+                  <div class="flex justify-between items-center mb-4">
+                     <div>
+                       <h2 class="text-lg font-medium text-gray-900">分析指示</h2>
+                       <p class="text-xs text-gray-500">
+                         使用するテーブルや集計方法、グラフ形式はここで指示します
+                       </p>
+                     </div>
+                  </div>
+                  <div class="flex gap-2 mb-2">
+                     <input 
+                       id="reportPromptInput" 
+                       type="text" 
+                       class="block w-full rounded-md border-0 py-1.5 text-gray-900 ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 sm:text-sm sm:leading-6"
+                       placeholder="例: sales_table を使って月別売上推移を折れ線グラフで表示"
+                     />
+                     <UButton id="reportPromptButton" color="primary">実行</UButton>
+                  </div>
+                  <div id="reportPromptResult" class="text-xs text-gray-500">
+                    指示内容に応じてグラフ生成または原因推論を行います。
+                  </div>
+               </UCard>
+             </section>
+
+             <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+               <!-- Charts Area -->
+               <UCard class="min-h-[400px] flex flex-col" id="reportChartCard">
+                  <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-base font-medium text-gray-900">集計グラフ</h3>
+                    <div class="flex gap-1">
+                       <UButton id="refreshReport" variant="ghost" color="gray" icon="i-heroicons-arrow-path" size="xs" />
+                       <UButton id="reportChartMaximize" variant="ghost" color="gray" icon="i-heroicons-arrows-pointing-out" size="xs" />
+                       <UButton id="reportChartReset" variant="ghost" color="gray" icon="i-heroicons-arrow-uturn-left" size="xs" />
+                    </div>
+                  </div>
+                  <div class="flex-1 relative min-h-[300px] w-full">
+                     <canvas id="reportChart"></canvas>
+                  </div>
+               </UCard>
+
+               <!-- Table Area (formerly hidden or side-by-side) -->
+               <UCard class="min-h-[400px] flex flex-col" id="reportDataCard">
+                  <div class="flex justify-between items-center mb-4">
+                     <h3 class="text-base font-medium text-gray-900">集計テーブル</h3>
+                     <div class="flex gap-1">
+                       <UButton id="refreshReportTable" variant="ghost" color="gray" icon="i-heroicons-arrow-path" size="xs" />
+                       <UButton id="reportTableMaximize" variant="ghost" color="gray" icon="i-heroicons-arrows-pointing-out" size="xs" />
+                       <UButton id="reportTableReset" variant="ghost" color="gray" icon="i-heroicons-arrow-uturn-left" size="xs" />
+                     </div>
+                  </div>
+                  <div id="reportSheet" class="report-sheet flex-1 overflow-auto"></div>
+               </UCard>
+             </section>
+
+             <!-- Analysis Result -->
+             <section>
+                <UCard>
+                   <div class="flex justify-between items-center mb-4">
+                      <h3 class="text-base font-medium text-gray-900">AI分析結果（自動生成）</h3>
+                   </div>
+                   <div id="reportCauseResult" class="text-sm text-gray-600 prose prose-sm max-w-none">
+                      推論結果をここに表示します。
+                   </div>
+                </UCard>
+             </section>
+
+          </main>
         </div>
-
-        <div class="mt-4">
-          <h2 class="h6 mb-0">集計結果（プロンプト実行後に表示）</h2>
-        </div>
-        <div class="report-grid">
-          <section
-            class="report-card report-chart-card is-hidden"
-            id="reportChartCard"
-          >
-            <div class="report-card__header report-card__handle">
-              <h2 class="h5 mb-0">集計グラフ</h2>
-              <div class="report-card__actions">
-                <UButton
-                  id="refreshReport"
-                  variant="outline"
-                  color="gray"
-                  size="sm"
-                  class="report-icon-button"
-                  aria-label="更新"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M20 12a8 8 0 1 1-2.34-5.66l.88-.88H15V3h6v6h-2.46l-.92.92A10 10 0 1 0 22 12h-2z"
-                    />
-                  </svg>
-                </UButton>
-                <UButton
-                  id="reportChartMaximize"
-                  variant="outline"
-                  color="gray"
-                  size="sm"
-                  class="report-icon-button report-maximize-button"
-                  aria-label="最大化"
-                >
-                  <svg
-                    class="report-icon--maximize"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"
-                    />
-                  </svg>
-                  <svg
-                    class="report-icon--restore"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M9 5H5v4h2V7h2V5zm10 0h-4v2h2v2h2V5zM5 15h2v2h2v2H5v-4zm14 0h-2v2h-2v2h4v-4z"
-                    />
-                  </svg>
-                </UButton>
-                <UButton
-                  id="reportChartReset"
-                  variant="outline"
-                  color="gray"
-                  size="sm"
-                  class="report-icon-button"
-                  aria-label="位置リセット"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M12 5v2.5l4-3.5-4-3.5V3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7z"
-                    />
-                  </svg>
-                </UButton>
-              </div>
-            </div>
-            <div class="report-chart report-chart--hero">
-              <canvas id="reportChart" height="120"></canvas>
-            </div>
-          </section>
-          <section
-            class="report-card report-table-card is-hidden"
-            id="reportDataCard"
-          >
-            <div class="report-card__header report-card__handle">
-              <h2 class="h5 mb-0">集計テーブル</h2>
-              <div class="report-card__actions">
-                <UButton
-                  id="refreshReportTable"
-                  variant="outline"
-                  color="gray"
-                  size="sm"
-                  class="report-icon-button"
-                  aria-label="更新"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M20 12a8 8 0 1 1-2.34-5.66l.88-.88H15V3h6v6h-2.46l-.92.92A10 10 0 1 0 22 12h-2z"
-                    />
-                  </svg>
-                </UButton>
-                <UButton
-                  id="reportTableMaximize"
-                  variant="outline"
-                  color="gray"
-                  size="sm"
-                  class="report-icon-button report-maximize-button"
-                  aria-label="最大化"
-                >
-                  <svg
-                    class="report-icon--maximize"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"
-                    />
-                  </svg>
-                  <svg
-                    class="report-icon--restore"
-                    viewBox="0 0 24 24"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M9 5H5v4h2V7h2V5zm10 0h-4v2h2v2h2V5zM5 15h2v2h2v2H5v-4zm14 0h-2v2h-2v2h4v-4z"
-                    />
-                  </svg>
-                </UButton>
-                <UButton
-                  id="reportTableReset"
-                  variant="outline"
-                  color="gray"
-                  size="sm"
-                  class="report-icon-button"
-                  aria-label="位置リセット"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      d="M12 5v2.5l4-3.5-4-3.5V3a9 9 0 1 0 9 9h-2a7 7 0 1 1-7-7z"
-                    />
-                  </svg>
-                </UButton>
-              </div>
-            </div>
-            <div id="reportSheet" class="report-sheet"></div>
-          </section>
-        </div>
-
-        <section class="report-card report-cause">
-          <div class="report-card__header">
-            <div>
-              <h2 class="h5 mb-1">AI分析結果（自動生成）</h2>
-              <p class="text-muted mb-0 small">
-                日別の変化点と理由を推論します。
-              </p>
-            </div>
-          </div>
-          <div
-            id="reportCauseResult"
-            class="report-cause__result text-muted small"
-          >
-            推論結果をここに表示します。
-          </div>
-        </section>
-
-        <section class="report-card report-prompt">
-          <div class="report-card__header">
-            <div>
-              <h2 class="h5 mb-1">分析指示（ここに入力）</h2>
-              <p class="text-muted mb-1 small">
-                使用するテーブルや集計方法、グラフ形式はここで指示します
-              </p>
-              <p class="text-muted mb-0 small">
-                例: 「sales_table を使って月別売上推移を折れ線グラフで表示」
-              </p>
-            </div>
-          </div>
-          <div class="report-prompt__row">
-            <input
-              id="reportPromptInput"
-              type="text"
-              class="form-control"
-              placeholder="例: sales_table を使って月別売上推移を折れ線グラフで表示"
-            />
-            <UButton id="reportPromptButton" color="primary"> 実行 </UButton>
-          </div>
-          <div
-            id="reportPromptResult"
-            class="report-prompt__result text-muted small"
-          >
-            指示内容に応じてグラフ生成または原因推論を行います。
-          </div>
-          <p class="text-muted small mb-0 mt-2">
-            例: 「2024年12月に売上が急増した理由を分析」
-          </p>
-        </section>
       </div>
     </div>
   </div>
@@ -292,12 +161,8 @@
 
 <script setup>
 useHead({
-  title: "帳票作成",
+  title: "帳票作成 | A2UI",
   link: [
-    {
-      rel: "stylesheet",
-      href: "https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css",
-    },
     {
       rel: "stylesheet",
       href: "/styles.css",
@@ -352,6 +217,7 @@ const metricValue = ref("");
 const chartTypeValue = ref("bar");
 
 function bindSelect(selectId, itemsRef, valueRef, fallbackValue = "") {
+  // Ensure DOM is ready (called in onMounted)
   const select = document.getElementById(selectId);
   if (!(select instanceof HTMLSelectElement)) {
     return;
@@ -400,6 +266,7 @@ onMounted(() => {
   bindSelect("reportColumnSelect", columnItems, columnValue);
   bindSelect("reportMetricSelect", metricItems, metricValue);
   bindSelect("reportChartType", ref(chartTypeItems), chartTypeValue, "bar");
+  
   if (typeof window !== "undefined") {
     const appWindow = window;
     const ensureReportScript = () =>

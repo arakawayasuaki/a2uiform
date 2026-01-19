@@ -162,6 +162,12 @@
                 </div>
               </UCard>
 
+              <UCard v-if="lastRawResponse" class="mt-4">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">DEBUG</p>
+                <h3 class="text-sm font-medium text-gray-900 mb-2">OpenAI 生レスポンス</h3>
+                <pre class="text-xs text-gray-700 whitespace-pre-wrap break-words bg-gray-50 border border-gray-200 rounded-md p-3">{{ lastRawResponse }}</pre>
+              </UCard>
+
               <!-- Property Panel -->
               <UCard class="mt-4 min-h-[400px]">
                  <PropertyPanel
@@ -203,7 +209,8 @@ const {
   undo,
   redo,
   canUndo,
-  canRedo
+  canRedo,
+  lastRawResponse
 } = useFormLogic();
 
 const promptText = ref('');

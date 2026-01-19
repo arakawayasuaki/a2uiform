@@ -7,6 +7,7 @@ export const useFormLogic = () => {
   const savedForms = useState<SavedForm[]>('savedForms', () => []);
   const currentFormId = useState<string | null>('currentFormId', () => null);
   const isGenerating = useState<boolean>('isGenerating', () => false);
+  const lastRawResponse = useState<string | null>('lastRawResponse', () => null);
 
   // Undo/Redo history for currentFormSpec
   const { history, undo, redo, canUndo, canRedo } = useRefHistory(currentFormSpec, {
@@ -135,25 +136,153 @@ export const useFormLogic = () => {
   };
 
   // Logic to generate form from prompt (migrated from app.js)
+
+  const mapFieldTypeToComponent = (type: string) => {
+    switch (type) {
+      case 'email':
+        return 'EmailField';
+      case 'tel':
+        return 'TelField';
+      case 'url':
+        return 'UrlField';
+      case 'number':
+        return 'NumberField';
+      case 'currency':
+        return 'CurrencyField';
+      case 'date':
+        return 'DateField';
+      case 'select':
+        return 'Select';
+      case 'radio':
+        return 'RadioGroup';
+      case 'checkbox':
+      case 'switch':
+        return 'CheckboxField';
+      default:
+        return 'TextField';
+    }
+  };
+
+  const buildComponentsFromFields = (fields: Array<any>) => {
+    const rootId = 'root';
+    const components: Record<string, FormComponent> = {
+      [rootId]: { id: rootId, component: 'Column', children: [] }
+    };
+    fields.forEach((field, index) => {
+      const id = field?.id ? String(field.id) : `field_${index}`;
+      const componentType = mapFieldTypeToComponent(String(field?.type || 'text'));
+      const component: FormComponent = {
+        id,
+        component: componentType,
+        label: field?.label || `項目${index + 1}`
+      };
+      if (field?.options && Array.isArray(field.options) && ['Select', 'RadioGroup'].includes(componentType)) {
+        component.options = field.options.map((opt: string) => ({ label: opt, value: opt }));
+      }
+      components[id] = component;
+      components[rootId]?.children?.push(id);
+    });
+    const submitId = 'submit_button';
+    components[submitId] = { id: submitId, component: 'Button', text: '送信' };
+    components[rootId]?.children?.push(submitId);
+    return { components, rootId };
+  };
+
+  const normalizeFormSpec = (parsed: any, prompt: string): FormSpec => {
+    const titleFromPrompt = prompt?.trim()?.slice(0, 30) || '無題';
+    let components: Record<string, FormComponent> =
+      parsed?.components && typeof parsed.components === 'object' && !Array.isArray(parsed.components)
+        ? parsed.components
+        : {};
+    if (Object.keys(components).length === 0 && Array.isArray(parsed?.fields)) {
+      const built = buildComponentsFromFields(parsed.fields);
+      components = built.components;
+      parsed.rootComponentId = built.rootId;
+    }
+    const rootId = parsed.rootComponentId && components[parsed.rootComponentId]
+      ? parsed.rootComponentId
+      : undefined;
+    const containerTypes = new Set(['Column', 'Row', 'Container']);
+
+    // Ensure component ids and normalize map entries.
+    for (const key in components) {
+      const comp = components[key];
+      if (!comp || typeof comp !== 'object') {
+        components[key] = { id: key, component: 'TextField', label: key };
+        continue;
+      }
+      if (!comp.id) comp.id = key;
+      // Normalize AI hallucinations (type -> component).
+      if (!comp.component && (comp as any).type) {
+        (comp as any).component = (comp as any).type;
+        delete (comp as any).type;
+      }
+    }
+
+    let resolvedRootId = rootId || 'root';
+    if (!components[resolvedRootId]) {
+      components[resolvedRootId] = { id: resolvedRootId, component: 'Column', children: [] };
+    }
+
+    const root = components[resolvedRootId]!;
+    if (!containerTypes.has(root.component)) {
+      const newRootId = components.root ? 'root_container' : 'root';
+      components[newRootId] = { id: newRootId, component: 'Column', children: [resolvedRootId] };
+      resolvedRootId = newRootId;
+    }
+    if (!components[resolvedRootId]) {
+      components[resolvedRootId] = { id: resolvedRootId, component: 'Column', children: [] };
+    }
+
+    const resolvedRoot = components[resolvedRootId]!;
+    if (!resolvedRoot.children) resolvedRoot.children = [];
+
+    const referencedChildren = new Set<string>();
+    for (const comp of Object.values(components)) {
+      comp?.children?.forEach((childId) => referencedChildren.add(childId));
+    }
+
+    const orphanIds = Object.keys(components).filter(
+      (id) => id !== resolvedRootId && !referencedChildren.has(id)
+    );
+    orphanIds.forEach((id) => {
+      if (!resolvedRoot.children?.includes(id)) {
+        resolvedRoot.children?.push(id);
+      }
+    });
+
+    return {
+      title: parsed.title || titleFromPrompt,
+      description: parsed.description || '',
+      fields: Array.isArray(parsed.fields) ? parsed.fields : [],
+      components,
+      rootComponentId: resolvedRootId
+    };
+  };
+
   const generateForm = async (prompt: string, model: string = 'gpt-4o-mini') => {
     isGenerating.value = true;
+    lastRawResponse.value = null;
     try {
       const systemPrompt = `
-        You are a form generation assistant.
-        Output a JSON object satisfying the FormSpec interface.
+        あなたは業務フォームの設計者です。
+        次のJSONスキーマだけを返してください。
         {
           "title": "Form Title",
           "description": "Form Description",
           "components": { ...flat map of components... },
           "rootComponentId": "root_id"
         }
-        - The root component should be a "Column" or "Row" container.
-        - Create a hierarchy using 'children' array.
-        - KEY REQUIREMENT: Use "component" property for the component type (NOT "type").
-        - Example component object:
-          "some_id": { "id": "some_id", "component": "TextField", "label": "Name" }
-        - Supported "component" values: TextField, LocalTextField, EmailField, TelField, UrlField, NumberField, CurrencyField, DateField, Select, RadioGroup, CheckboxField, Button, Column, Row.
-        - Use Japanese for labels.
+        - JSON以外の文章は一切出力しないでください。
+        - ルートコンポーネントは "Column" または "Row" のコンテナにしてください。
+        - 子要素は "children" 配列で階層化してください。
+        - "type" ではなく "component" を使用してください。
+        - 例:
+          "root": { "id": "root", "component": "Column", "children": ["name", "amount", "submit"] }
+        - component の許可値:
+          TextField, EmailField, TelField, UrlField, NumberField, CurrencyField, DateField,
+          Select, RadioGroup, CheckboxField, Button, Column, Row
+        - ラベルは日本語にしてください。
       `;
       
       const response = await fetch('/api/openai', {
@@ -165,7 +294,9 @@ export const useFormLogic = () => {
             { role: 'system', content: systemPrompt },
             { role: 'user', content: `Create a form based on this request: ${prompt}` }
           ],
-          response_format: { type: 'json_object' }
+          response_format: { type: 'json_object' },
+          temperature: 0.2,
+          max_tokens: 1200
         })
       });
 
@@ -174,23 +305,14 @@ export const useFormLogic = () => {
       const content = data.choices?.[0]?.message?.content;
       if (!content) throw new Error('No content returned');
       
+      console.log('API Raw Response:', content);
+      lastRawResponse.value = content;
       const parsed = JSON.parse(content);
-      
-      
-      // Normalize 'type' to 'component' to handle AI hallucinations
-      if (parsed.components) {
-        for (const key in parsed.components) {
-          const comp = parsed.components[key];
-          if (!comp.component && comp.type) {
-             comp.component = comp.type;
-             delete comp.type;
-          }
-        }
-      }
 
-      console.log('API Response Schema:', parsed);
-      currentFormSpec.value = parsed;
-      return parsed;
+      const normalized = normalizeFormSpec(parsed, prompt);
+      console.log('API Response Schema:', normalized);
+      currentFormSpec.value = normalized;
+      return normalized;
     } catch (e) {
       console.error('Generation failed', e);
       throw e;
@@ -208,15 +330,17 @@ export const useFormLogic = () => {
     // Find parent
     let parentId: string | undefined;
     for (const key in comps) {
-      if (comps[key].children?.includes(id)) {
+      const comp = comps[key];
+      if (comp?.children?.includes(id)) {
         parentId = key;
         break;
       }
     }
     
     // Remove from parent
-    if (parentId && comps[parentId].children) {
-      comps[parentId].children = comps[parentId].children.filter(childId => childId !== id);
+    const parent = parentId ? comps[parentId] : undefined;
+    if (parent?.children) {
+      parent.children = parent.children.filter(childId => childId !== id);
     }
     
     // Recursive delete
@@ -241,6 +365,7 @@ export const useFormLogic = () => {
     savedForms,
     currentFormId,
     isGenerating,
+    lastRawResponse,
     initSavedForms,
     saveFormToStorage,
     deleteSavedForm,
